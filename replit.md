@@ -1,10 +1,10 @@
-# [Project name]
+# Project Atlas
 
-_Replace the heading above with the project's name, and this line with one sentence describing what this app does for users._
+A consent-first enterprise digital twin workspace for Oil & Gas EPC teams, with web and mobile companions.
 
 ## Run & Operate
 
-- `pnpm --filter @workspace/api-server run dev` — run the API server (port 5000)
+- `pnpm --filter @workspace/api-server run dev` — run the API server (binds to `PORT`)
 - `pnpm run typecheck` — full typecheck across all packages
 - `pnpm run build` — typecheck + build all packages
 - `pnpm --filter @workspace/api-spec run codegen` — regenerate API hooks and Zod schemas from the OpenAPI spec
@@ -22,23 +22,28 @@ _Replace the heading above with the project's name, and this line with one sente
 
 ## Where things live
 
-_Populate as you build — short repo map plus pointers to the source-of-truth file for DB schema, API contracts, theme files, etc._
+- `lib/api-spec/openapi.yaml` — shared API contract; regenerate clients after edits.
+- `lib/db/src/schema/atlas.ts` — workspace, twin, evidence, activity, and review records.
+- `artifacts/api-server/src/routes/atlas*.ts` — authenticated Atlas features.
+- `artifacts/atlas-web` and `artifacts/atlas-mobile` — web and mobile clients.
 
 ## Architecture decisions
 
-_Populate as you build — non-obvious choices a reader couldn't infer from the code (3-5 bullets)._
+- A person must confirm permission to use a source and separately consent to profile analysis. Analysis also requires a fresh explicit request; suggestions are evidence-linked and never auto-applied.
+- Consequential decisions always require human review, regardless of the selected autonomy ceiling.
+- Live enterprise connectors, meeting attendance, autonomous execution, and SSO/SCIM are outside the first release.
 
 ## Product
 
-_Describe the high-level user-facing capabilities of this app once they exist._
+Signed-in workspace onboarding, twin calibration, private evidence sources, meetings and actions, reviewed decisions, memory search, knowledge links, and governance activity. Web and mobile share the same API and records.
 
 ## User preferences
 
-_Populate as you build — explicit user instructions worth remembering across sessions._
+- Never seed or invent mock product records. Keep missing information blank and ask the person to provide it or upload a source.
 
 ## Gotchas
 
-_Populate as you build — sharp edges, "always run X before Y" rules._
+- Profile analysis currently reads notes, plain text, and Markdown; PDF and DOCX may be stored privately but are not yet parsed for suggestions.
 
 ## Pointers
 

@@ -209,6 +209,17 @@ export const AtlasSourceAnalysisStatus = {
   failed: 'failed',
 } as const;
 
+export interface ProfileSuggestion {
+  key: TwinFieldKey;
+  suggestedValue: string;
+  evidence: string;
+  /**
+     * @minimum 0
+     * @maximum 1
+     */
+  confidence: number;
+}
+
 export interface AtlasSource {
   id: string;
   title: string;
@@ -220,6 +231,7 @@ export interface AtlasSource {
   permissionConfirmed: boolean;
   profileAnalysisConsent: boolean;
   analysisStatus: AtlasSourceAnalysisStatus;
+  analysisSuggestions: ProfileSuggestion[];
   createdAt: string;
 }
 
@@ -227,17 +239,6 @@ export const SourceAnalysisInputValue = {
   confirmAnalysis: true,
 } as const;
 export type SourceAnalysisInput = typeof SourceAnalysisInputValue;
-
-export interface ProfileSuggestion {
-  key: TwinFieldKey;
-  suggestedValue: string;
-  evidence: string;
-  /**
-     * @minimum 0
-     * @maximum 1
-     */
-  confidence: number;
-}
 
 export interface SourceAnalysis {
   sourceId: string;

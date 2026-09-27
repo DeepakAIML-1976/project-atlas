@@ -1,0 +1,27 @@
+import { Link } from 'wouter';
+import { ArrowRight, ArrowUpRight, Check, CircleDot, Fingerprint, GitBranch, LockKeyhole, ShieldCheck } from 'lucide-react';
+import { useHealthCheck } from '@workspace/api-client-react';
+import { Brand } from '@/components/atlas-ui';
+
+export function Landing() {
+  const health=useHealthCheck();
+  return <div className="landing">
+    <header className="landing-header"><Brand light/><div style={{display:'flex',alignItems:'center',gap:22}}><span className="landing-header-note">A workspace for your working self.</span><Link href="/sign-in" className="btn btn-outline" data-testid="link-sign-in">Sign in <ArrowUpRight size={14}/></Link></div></header>
+    <main>
+      <section className="landing-hero">
+        <div className="landing-hero-copy reveal"><div className="eyebrow">PROJECT ATLAS / A PERSONAL WORKSPACE</div><h1>Know what<br/>you know.<br/><em>Keep the say.</em></h1><p>A digital twin built from evidence you choose, calibrated by your review, and bounded by your decisions. An instrument for clearer work, not a substitute for you.</p><div style={{display:'flex',gap:10,flexWrap:'wrap',marginTop:31}}><Link href="/sign-up" className="btn btn-primary" data-testid="link-create-account">Create your workspace <ArrowRight/></Link><Link href="/sign-in" className="btn btn-outline" data-testid="link-return-workspace">Return to workspace</Link></div><div className="landing-fine"><span className="small-dot"/> Empty by default <span className="small-dot"/> Consent before analysis <span className="small-dot"/> Human review always</div></div>
+        <div className="atlas-visual" aria-hidden="true"><div className="visual-orbit orbit-one"/><div className="visual-orbit orbit-two"/><div className="visual-orbit orbit-three"/><div className="visual-orbit orbit-four"/><div className="visual-core"><span>a</span></div><div className="visual-label label-one"><span>01 / INPUT</span><strong>What you provide</strong></div><div className="visual-label label-two"><span>02 / REVIEW</span><strong>What you confirm</strong></div><div className="visual-label label-three"><span>03 / BOUNDARY</span><strong>What stays yours</strong></div><div className="orbit-point p-one"/><div className="orbit-point p-two"/><div className="orbit-point p-three"/></div>
+      </section>
+      <section className="landing-principle"><div className="eyebrow">THE DIFFERENCE IS THE BOUNDARY</div><div className="principle-grid"><h2>Intelligence without<br/><em>presumption.</em></h2><div><p>Most systems start by collecting everything. Atlas begins with a blank page. You decide which evidence enters, whether it can be analyzed, and which suggestions become part of your profile.</p><span className="mono" style={{fontSize:10,letterSpacing:'.08em'}}>NO CONNECTIONS. NO BACKGROUND INGESTION. NO IMPLIED CONSENT.</span></div></div></section>
+      <section className="landing-steps"><div className="eyebrow">HOW YOUR TWIN TAKES SHAPE</div><h2>A record you can<br/><em>stand behind.</em></h2><div className="steps-grid">{[
+        {n:'01',icon:Fingerprint,title:'Define yourself',copy:'Review role, priorities, working style, and boundaries one field at a time. Unknown stays unknown.'},
+        {n:'02',icon:LockKeyhole,title:'Choose your evidence',copy:'Add notes and private files only when you have permission. Analysis requires separate, explicit confirmation.'},
+        {n:'03',icon:GitBranch,title:'Follow the thread',copy:'Connect sources, briefings, and proposals so the reasoning behind a record stays visible.'},
+        {n:'04',icon:ShieldCheck,title:'Keep the decision',copy:'Document a recommendation. Approve, reject, or escalate it yourself. Atlas never takes the final action.'}
+      ].map(({n,icon:Icon,title,copy})=><article className="step-card" key={n}><div className="step-top"><span>{n}</span><Icon size={21} strokeWidth={1.4}/></div><h3>{title}</h3><p>{copy}</p></article>)}</div></section>
+      <section className="landing-statement"><div className="eyebrow" style={{color:'#e5a483'}}>AN HONEST FIRST RELEASE</div><h2>Useful today.<br/><em>Clear about what’s not.</em></h2><div className="statement-grid"><div><CircleDot size={20}/><strong>Recorded briefings</strong><p>Document meetings and actions after the fact. Atlas does not attend or record live meetings.</p></div><div><CircleDot size={20}/><strong>No enterprise connections</strong><p>Bring in material yourself. This release does not connect email, chat, drives, or business systems.</p></div><div><CircleDot size={20}/><strong>Review before consequence</strong><p>Suggestions are never silently applied. Decisions require a human reviewer.</p></div></div></section>
+      <section className="landing-end"><div><div className="eyebrow">BEGIN ON YOUR TERMS</div><h2>Your perspective,<br/><em>made legible.</em></h2><p>Start empty. Add only what matters. Keep control of the record.</p><Link className="btn btn-primary" href="/sign-up" data-testid="link-start-atlas">Start your Atlas <ArrowRight/></Link></div><div className="end-mark" aria-hidden="true">a</div></section>
+    </main>
+    <footer className="landing-footer"><span>atlas. / Project Atlas</span><span><Check size={13}/> {health.isSuccess?'Workspace service available':health.isError?'Service status unavailable':'Checking service'}</span><span>Evidence first. Human always.</span></footer>
+  </div>;
+}

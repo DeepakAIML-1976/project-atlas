@@ -190,6 +190,11 @@ export const UpdateMyTwinAutonomyResponse = zod.object({
 /**
  * @summary List user-authorized source records
  */
+export const getAtlasSourcesResponseAnalysisSuggestionsItemConfidenceMin = 0;
+export const getAtlasSourcesResponseAnalysisSuggestionsItemConfidenceMax = 1;
+
+
+
 export const GetAtlasSourcesResponseItem = zod.object({
   "id": zod.string(),
   "title": zod.string(),
@@ -199,6 +204,12 @@ export const GetAtlasSourcesResponseItem = zod.object({
   "permissionConfirmed": zod.boolean(),
   "profileAnalysisConsent": zod.boolean(),
   "analysisStatus": zod.enum(['not_requested', 'suggestions_ready', 'unsupported_format', 'failed']),
+  "analysisSuggestions": zod.array(zod.object({
+  "key": zod.enum(['role', 'expertise', 'priorities', 'communicationStyle', 'decisionMethodology', 'riskTolerance', 'delegationRules', 'approvalLimits', 'meetingBehavior', 'stakeholderRelationships']),
+  "suggestedValue": zod.string(),
+  "evidence": zod.string(),
+  "confidence": zod.number().min(getAtlasSourcesResponseAnalysisSuggestionsItemConfidenceMin).max(getAtlasSourcesResponseAnalysisSuggestionsItemConfidenceMax)
+})),
   "createdAt": zod.coerce.date()
 })
 export const GetAtlasSourcesResponse = zod.array(GetAtlasSourcesResponseItem)
@@ -222,6 +233,11 @@ export const CreateAtlasSourceBody = zod.object({
   "profileAnalysisConsent": zod.boolean()
 })
 
+export const createAtlasSourceResponseAnalysisSuggestionsItemConfidenceMin = 0;
+export const createAtlasSourceResponseAnalysisSuggestionsItemConfidenceMax = 1;
+
+
+
 export const CreateAtlasSourceResponse = zod.object({
   "id": zod.string(),
   "title": zod.string(),
@@ -231,6 +247,12 @@ export const CreateAtlasSourceResponse = zod.object({
   "permissionConfirmed": zod.boolean(),
   "profileAnalysisConsent": zod.boolean(),
   "analysisStatus": zod.enum(['not_requested', 'suggestions_ready', 'unsupported_format', 'failed']),
+  "analysisSuggestions": zod.array(zod.object({
+  "key": zod.enum(['role', 'expertise', 'priorities', 'communicationStyle', 'decisionMethodology', 'riskTolerance', 'delegationRules', 'approvalLimits', 'meetingBehavior', 'stakeholderRelationships']),
+  "suggestedValue": zod.string(),
+  "evidence": zod.string(),
+  "confidence": zod.number().min(createAtlasSourceResponseAnalysisSuggestionsItemConfidenceMin).max(createAtlasSourceResponseAnalysisSuggestionsItemConfidenceMax)
+})),
   "createdAt": zod.coerce.date()
 })
 
@@ -242,6 +264,11 @@ export const GetAtlasSourceParams = zod.object({
   "sourceId": zod.coerce.string()
 })
 
+export const getAtlasSourceResponseAnalysisSuggestionsItemConfidenceMin = 0;
+export const getAtlasSourceResponseAnalysisSuggestionsItemConfidenceMax = 1;
+
+
+
 export const GetAtlasSourceResponse = zod.object({
   "id": zod.string(),
   "title": zod.string(),
@@ -251,6 +278,12 @@ export const GetAtlasSourceResponse = zod.object({
   "permissionConfirmed": zod.boolean(),
   "profileAnalysisConsent": zod.boolean(),
   "analysisStatus": zod.enum(['not_requested', 'suggestions_ready', 'unsupported_format', 'failed']),
+  "analysisSuggestions": zod.array(zod.object({
+  "key": zod.enum(['role', 'expertise', 'priorities', 'communicationStyle', 'decisionMethodology', 'riskTolerance', 'delegationRules', 'approvalLimits', 'meetingBehavior', 'stakeholderRelationships']),
+  "suggestedValue": zod.string(),
+  "evidence": zod.string(),
+  "confidence": zod.number().min(getAtlasSourceResponseAnalysisSuggestionsItemConfidenceMin).max(getAtlasSourceResponseAnalysisSuggestionsItemConfidenceMax)
+})),
   "createdAt": zod.coerce.date()
 })
 

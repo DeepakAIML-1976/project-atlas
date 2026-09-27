@@ -1,0 +1,1058 @@
+import { Router, type IRouter } from "express";
+import { privateFile } from "../lib/atlasStorage";
+import { and, desc, eq, ilike, isNull, or } from "drizzle-orm";
+import {
+  CreateAtlasDecisionBody,
+  CreateAtlasDecisionResponse,
+  CreateAtlasKnowledgeLinkBody,
+  CreateAtlasKnowledgeLinkResponse,
+  CreateAtlasMeetingBody,
+  CreateAtlasMeetingResponse,
+  CreateAtlasSourceBody,
+  CreateAtlasSourceResponse,
+  CreateMeetingActionBody,
+  CreateMeetingActionParams,
+  CreateMeetingActionResponse,
+  DeleteAtlasKnowledgeLinkParams,
+  DeleteAtlasKnowledgeLinkResponse,
+  DeleteAtlasSourceParams,
+  DeleteAtlasSourceResponse,
+  GetAtlasActivityResponse,
+  GetAtlasDecisionsResponse,
+  GetAtlasKnowledgeGraphResponse,
+  GetAtlasMeetingsResponse,
+  GetAtlasOverviewResponse,
+  GetAtlasSessionResponse,
+  GetAtlasSourceParams,
+  GetAtlasSourceResponse,
+  GetAtlasSourcesResponse,
+  GetMyTwinResponse,
+  ReviewAtlasDecisionBody,
+  ReviewAtlasDecisionParams,
+  ReviewAtlasDecisionResponse,
+  SearchAtlasMemoryQueryParams,
+  SearchAtlasMemoryResponse,
+  UpdateMeetingActionBody,
+  UpdateMeetingActionParams,
+  UpdateMeetingActionResponse,
+  UpdateMyTwinAutonomyBody,
+  UpdateMyTwinAutonomyResponse,
+  UpdateMyTwinFieldBody,
+  UpdateMyTwinFieldResponse,
+  CreateAtlasWorkspaceBody,
+  CreateAtlasWorkspaceResponse,
+} from "@workspace/api-zod";
+import {
+  atlasActionsTable,
+  atlasActivityTable,
+  atlasDecisionsTable,
+  atlasKnowledgeLinksTable,
+  atlasMeetingsTable,
+  atlasMembershipsTable,
+  atlasSourcesTable,
+  atlasTwinFieldsTable,
+  atlasTwinsTable,
+  atlasUploadsTable,
+  atlasWorkspacesTable,
+  db,
+} from "@workspace/db";
+import {
+  autonomyLabel,
+  authenticatedUser,
+  profileCompletion,
+  requireSharedWrite,
+  TWIN_FIELD_KEYS,
+  userTwin,
+  workspaceContext,
+} from "../lib/atlas";
+
+const router: IRouter = Router();
+const recordTypes = ["source", "meeting", "decision"] as const;
+
+async function activity(
+  workspaceId: string,
+  userId: string,
+  action: string,
+  recordType: string,
+  recordId: string,
+): Promise<void> {
+  await db.insert(atlasActivityTable).values({
+    workspaceId,
+    userId,
+    action,
+    recordType,
+    recordId,
+  });
+}
+
+function sourceResponse(source: typeof atlasSourcesTable.$inferSelect, viewerId: string) {
+  return {
+    id: source.id,
+    title: source.title,
+    kind: source.kind,
+    contentType: source.contentType,
+    sourceDate: source.sourceDate,
+    permissionConfirmed: source.permissionConfirmed,
+    profileAnalysisConsent: source.profileAnalysisConsent,
+    analysisStatus: source.analysisStatus,
+    analysisSuggestions: source.creatorId === viewerId ? source.analysisSuggestions : [],
+    createdAt: source.createdAt,
+  };
+}
+
+async function meetingResponse(
+  meeting: typeof atlasMeetingsTable.$inferSelect,
+  workspaceId: string,
+) {
+  const actions = await db
+    .select()
+    .from(atlasActionsTable)
+    .where(
+      and(
+        eq(atlasActionsTable.workspaceId, workspaceId),
+        eq(atlasActionsTable.meetingId, meeting.id),
+      ),
+    )
+    .orderBy(atlasActionsTable.createdAt);
+  return {
+    ...meeting,
+    actions,
+  };
+}
+
+router.get("/atlas/session", async (req, res): Promise<void> => {
+  const userId = await authenticatedUser(req, res);
+  if (!userId) return;
+  const memberships = await db
+    .select()
+    .from(atlasMembershipsTable)
+    .where(eq(atlasMembershipsTable.userId, userId))
+    .limit(1);
+  const membership = memberships[0];
+  const workspace = membership
+    ? (
+        await db
+          .select()
+          .from(atlasWorkspacesTable)
+          .where(eq(atlasWorkspacesTable.id, membership.workspaceId))
+          .limit(1)
+      )[0] ?? null
+    : null;
+  res.json(
+    GetAtlasSessionResponse.parse({
+      userId,
+      workspace,
+      role: membership?.role ?? null,
+    }),
+  );
+});
+
+router.post("/atlas/workspaces", async (req, res): Promise<void> => {
+  const userId = await authenticatedUser(req, res);
+  if (!userId) return;
+  const parsed = CreateAtlasWorkspaceBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const priorOwner = await db
+    .select({ id: atlasMembershipsTable.id })
+    .from(atlasMembershipsTable)
+    .where(
+      and(
+        eq(atlasMembershipsTable.userId, userId),
+        eq(atlasMembershipsTable.role, "owner"),
+      ),
+    )
+    .limit(1);
+  if (priorOwner.length > 0) {
+    res.status(409).json({ error: "User already owns a workspace" });
+    return;
+  }
+  const workspace = await db.transaction(async (tx) => {
+    const [created] = await tx
+      .insert(atlasWorkspacesTable)
+      .values(parsed.data)
+      .returning();
+    await tx.insert(atlasMembershipsTable).values({
+      workspaceId: created.id,
+      userId,
+      role: "owner",
+    });
+    await tx.insert(atlasTwinsTable).values({
+      workspaceId: created.id,
+      ownerId: userId,
+      autonomyLevel: 1,
+    });
+    return created;
+  });
+  await activity(workspace.id, userId, "created", "workspace", workspace.id);
+  res.status(201).json(
+    CreateAtlasWorkspaceResponse.parse({
+      userId,
+      workspace,
+      role: "owner",
+    }),
+  );
+});
+
+router.get("/atlas/overview", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const [workspace] = await db
+    .select()
+    .from(atlasWorkspacesTable)
+    .where(eq(atlasWorkspacesTable.id, context.workspaceId));
+  const twins = await db
+    .select()
+    .from(atlasTwinsTable)
+    .where(eq(atlasTwinsTable.workspaceId, context.workspaceId));
+  const sources = await db
+    .select()
+    .from(atlasSourcesTable)
+    .where(eq(atlasSourcesTable.workspaceId, context.workspaceId));
+  const meetings = await db
+    .select()
+    .from(atlasMeetingsTable)
+    .where(eq(atlasMeetingsTable.workspaceId, context.workspaceId));
+  const pendingDecisions = await db
+    .select()
+    .from(atlasDecisionsTable)
+    .where(
+      and(
+        eq(atlasDecisionsTable.workspaceId, context.workspaceId),
+        eq(atlasDecisionsTable.status, "pending"),
+      ),
+    );
+  const actions = await db
+    .select()
+    .from(atlasActionsTable)
+    .where(eq(atlasActionsTable.workspaceId, context.workspaceId));
+  const links = await db
+    .select()
+    .from(atlasKnowledgeLinksTable)
+    .where(eq(atlasKnowledgeLinksTable.workspaceId, context.workspaceId));
+  const twin = await userTwin(context);
+  const twinFields = twin
+    ? await db
+        .select()
+        .from(atlasTwinFieldsTable)
+        .where(eq(atlasTwinFieldsTable.twinId, twin.id))
+    : [];
+  const completion = profileCompletion(twinFields);
+  const setupNeeds: string[] = [];
+  if (completion < 100) setupNeeds.push("Complete your digital twin profile");
+  if (sources.length === 0) setupNeeds.push("Add a source");
+  if (meetings.length === 0) setupNeeds.push("Add a meeting");
+  res.json(
+    GetAtlasOverviewResponse.parse({
+      workspace,
+      counts: {
+        twins: twins.length,
+        sources: sources.length,
+        meetings: meetings.length,
+        pendingDecisions: pendingDecisions.length,
+        actions: actions.length,
+        knowledgeLinks: links.length,
+      },
+      profileCompletion: completion,
+      setupNeeds,
+    }),
+  );
+});
+
+router.get("/atlas/twins/me", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const twin = await userTwin(context);
+  if (!twin) {
+    res.status(404).json({ error: "Digital twin not found" });
+    return;
+  }
+  const persistedFields = await db
+    .select()
+    .from(atlasTwinFieldsTable)
+    .where(eq(atlasTwinFieldsTable.twinId, twin.id));
+  const fieldMap = new Map(persistedFields.map((field) => [field.key, field]));
+  const fields = TWIN_FIELD_KEYS.map((key) => {
+    const field = fieldMap.get(key);
+    return {
+      key,
+      value: field?.value ?? null,
+      evidenceStatus: field?.evidenceStatus ?? "unknown",
+      sourceIds: field?.sourceIds ?? [],
+      confidence: field?.confidence ?? null,
+      updatedAt: field?.updatedAt ?? null,
+    };
+  });
+  res.json(
+    GetMyTwinResponse.parse({
+      id: twin.id,
+      ownerId: twin.ownerId,
+      displayName: twin.displayName,
+      autonomy: {
+        level: twin.autonomyLevel,
+        label: autonomyLabel(twin.autonomyLevel),
+        approvalRequired: true,
+        updatedAt: twin.autonomyUpdatedAt,
+      },
+      fields,
+      profileCompletion: profileCompletion(fields),
+    }),
+  );
+});
+
+router.patch("/atlas/twins/me/fields", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const parsed = UpdateMyTwinFieldBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const twin = await userTwin(context);
+  if (!twin) {
+    res.status(404).json({ error: "Digital twin not found" });
+    return;
+  }
+  const sourceIds = parsed.data.sourceIds ?? [];
+  if (sourceIds.length > 0) {
+    const foundSources = await db
+      .select({ id: atlasSourcesTable.id })
+      .from(atlasSourcesTable)
+      .where(
+        and(
+          eq(atlasSourcesTable.workspaceId, context.workspaceId),
+          eq(atlasSourcesTable.permissionConfirmed, true),
+        ),
+      );
+    const allowed = new Set(foundSources.map((source) => source.id));
+    if (sourceIds.some((id) => !allowed.has(id))) {
+      res.status(400).json({ error: "A source does not belong to this workspace" });
+      return;
+    }
+  }
+  const updatedAt = new Date();
+  const [field] = await db
+    .insert(atlasTwinFieldsTable)
+    .values({
+      twinId: twin.id,
+      key: parsed.data.key,
+      value: parsed.data.value,
+      evidenceStatus: "confirmed",
+      sourceIds,
+      confidence: 1,
+      updatedAt,
+    })
+    .onConflictDoUpdate({
+      target: [atlasTwinFieldsTable.twinId, atlasTwinFieldsTable.key],
+      set: {
+        value: parsed.data.value,
+        evidenceStatus: "confirmed",
+        sourceIds,
+        confidence: 1,
+        updatedAt,
+      },
+    })
+    .returning();
+  await activity(context.workspaceId, context.userId, "updated", "twin_field", field.id);
+  res.json(UpdateMyTwinFieldResponse.parse(field));
+});
+
+router.patch("/atlas/twins/me/autonomy", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const parsed = UpdateMyTwinAutonomyBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const twin = await userTwin(context);
+  if (!twin) {
+    res.status(404).json({ error: "Digital twin not found" });
+    return;
+  }
+  const updatedAt = new Date();
+  await db
+    .update(atlasTwinsTable)
+    .set({
+      autonomyLevel: parsed.data.level,
+      autonomyReason: parsed.data.reason,
+      autonomyUpdatedAt: updatedAt,
+    })
+    .where(
+      and(
+        eq(atlasTwinsTable.id, twin.id),
+        eq(atlasTwinsTable.workspaceId, context.workspaceId),
+        eq(atlasTwinsTable.ownerId, context.userId),
+      ),
+    );
+  await activity(context.workspaceId, context.userId, "updated", "twin_autonomy", twin.id);
+  res.json(
+    UpdateMyTwinAutonomyResponse.parse({
+      level: parsed.data.level,
+      label: autonomyLabel(parsed.data.level),
+      approvalRequired: true,
+      updatedAt,
+    }),
+  );
+});
+
+router.get("/atlas/sources", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const sources = await db
+    .select()
+    .from(atlasSourcesTable)
+    .where(eq(atlasSourcesTable.workspaceId, context.workspaceId))
+    .orderBy(desc(atlasSourcesTable.createdAt));
+  res.json(GetAtlasSourcesResponse.parse(sources.map((source) => sourceResponse(source, context.userId))));
+});
+
+router.post("/atlas/sources", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+  const parsed = CreateAtlasSourceBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  if (parsed.data.permissionConfirmed !== true) {
+    res.status(403).json({ error: "Confirm permission to store this source" });
+    return;
+  }
+  const objectPath = parsed.data.objectPath ?? null;
+  if (objectPath) {
+    try {
+      const [reservation] = await db.select().from(atlasUploadsTable).where(and(
+        eq(atlasUploadsTable.objectPath, objectPath),
+        eq(atlasUploadsTable.workspaceId, context.workspaceId),
+        eq(atlasUploadsTable.userId, context.userId),
+        isNull(atlasUploadsTable.consumedAt),
+      )).limit(1);
+      if (!reservation) {
+        res.status(400).json({ error: "Upload reservation not found or already used" });
+        return;
+      }
+      const file = privateFile(objectPath);
+      const [exists] = await file.exists();
+      if (!exists) {
+        res.status(400).json({ error: "Finish uploading the file before adding it as a source" });
+        return;
+      }
+      const [metadata] = await file.getMetadata();
+      if (Number(metadata.size) !== reservation.size || metadata.contentType !== reservation.contentType) {
+        res.status(400).json({ error: "The uploaded file does not match its reserved size or type" });
+        return;
+      }
+    } catch {
+      res.status(400).json({ error: "Invalid uploaded object" });
+      return;
+    }
+  }
+  const source = await db.transaction(async (tx) => {
+    let upload: typeof atlasUploadsTable.$inferSelect | null = null;
+    if (objectPath) {
+      const [reservation] = await tx
+        .select()
+        .from(atlasUploadsTable)
+        .where(
+          and(
+            eq(atlasUploadsTable.objectPath, objectPath),
+            eq(atlasUploadsTable.workspaceId, context.workspaceId),
+            eq(atlasUploadsTable.userId, context.userId),
+            isNull(atlasUploadsTable.consumedAt),
+          ),
+        )
+        .for("update")
+        .limit(1);
+      upload = reservation ?? null;
+      if (!upload) return null;
+    }
+    const [created] = await tx
+      .insert(atlasSourcesTable)
+      .values({
+        workspaceId: context.workspaceId,
+        creatorId: context.userId,
+        title: parsed.data.title,
+        kind: parsed.data.kind,
+        content: parsed.data.content ?? null,
+        objectPath,
+        contentType: upload?.contentType ?? parsed.data.contentType ?? null,
+        sourceDate: parsed.data.sourceDate ?? null,
+        permissionConfirmed: parsed.data.permissionConfirmed,
+        profileAnalysisConsent: parsed.data.profileAnalysisConsent,
+      })
+      .returning();
+    if (upload) {
+      const [consumed] = await tx
+        .update(atlasUploadsTable)
+        .set({ consumedAt: new Date() })
+        .where(
+          and(
+            eq(atlasUploadsTable.id, upload.id),
+            eq(atlasUploadsTable.workspaceId, context.workspaceId),
+            eq(atlasUploadsTable.userId, context.userId),
+            isNull(atlasUploadsTable.consumedAt),
+          ),
+        )
+        .returning({ id: atlasUploadsTable.id });
+      if (!consumed) throw new Error("Upload reservation could not be consumed");
+    }
+    return created;
+  });
+  if (!source) {
+    res.status(400).json({ error: "Upload reservation not found or already used" });
+    return;
+  }
+  await activity(context.workspaceId, context.userId, "created", "source", source.id);
+  res.status(201).json(CreateAtlasSourceResponse.parse(sourceResponse(source, context.userId)));
+});
+
+router.get("/atlas/sources/:sourceId", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const params = GetAtlasSourceParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const [source] = await db
+    .select()
+    .from(atlasSourcesTable)
+    .where(
+      and(
+        eq(atlasSourcesTable.id, params.data.sourceId),
+        eq(atlasSourcesTable.workspaceId, context.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!source) {
+    res.status(404).json({ error: "Source not found" });
+    return;
+  }
+  res.json(GetAtlasSourceResponse.parse(sourceResponse(source, context.userId)));
+});
+
+router.delete("/atlas/sources/:sourceId", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+  const params = DeleteAtlasSourceParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const [source] = await db
+    .select()
+    .from(atlasSourcesTable)
+    .where(
+      and(
+        eq(atlasSourcesTable.id, params.data.sourceId),
+        eq(atlasSourcesTable.workspaceId, context.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!source) {
+    res.status(404).json({ error: "Source not found" });
+    return;
+  }
+  if (source.creatorId !== context.userId) {
+    res.status(403).json({ error: "Only the source owner can remove it" });
+    return;
+  }
+  if (source.objectPath) {
+    try {
+      await privateFile(source.objectPath).delete({ ignoreNotFound: true });
+    } catch (error) {
+      req.log.error({ err: error }, "Private source deletion failed");
+      res.status(502).json({ error: "The private file could not be removed; the source was not deleted" });
+      return;
+    }
+  }
+  await db.transaction(async (tx) => {
+    await tx
+      .delete(atlasKnowledgeLinksTable)
+      .where(
+        and(
+          eq(atlasKnowledgeLinksTable.workspaceId, context.workspaceId),
+          or(
+            eq(atlasKnowledgeLinksTable.sourceRecordId, source.id),
+            eq(atlasKnowledgeLinksTable.targetRecordId, source.id),
+          ),
+        ),
+      );
+    const workspaceTwins = await tx
+      .select({ id: atlasTwinsTable.id })
+      .from(atlasTwinsTable)
+      .where(eq(atlasTwinsTable.workspaceId, context.workspaceId));
+    for (const twin of workspaceTwins) {
+      const fields = await tx
+        .select()
+        .from(atlasTwinFieldsTable)
+        .where(eq(atlasTwinFieldsTable.twinId, twin.id));
+      for (const field of fields) {
+        if (field.sourceIds.includes(source.id)) {
+          await tx
+            .update(atlasTwinFieldsTable)
+            .set({ sourceIds: field.sourceIds.filter((id) => id !== source.id) })
+            .where(eq(atlasTwinFieldsTable.id, field.id));
+        }
+      }
+    }
+    await tx
+      .delete(atlasSourcesTable)
+      .where(
+        and(
+          eq(atlasSourcesTable.id, source.id),
+          eq(atlasSourcesTable.workspaceId, context.workspaceId),
+        ),
+      );
+  });
+  await activity(context.workspaceId, context.userId, "deleted", "source", source.id);
+  res.status(204).json(DeleteAtlasSourceResponse.parse(undefined));
+});
+
+router.get("/atlas/meetings", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const meetings = await db
+    .select()
+    .from(atlasMeetingsTable)
+    .where(eq(atlasMeetingsTable.workspaceId, context.workspaceId))
+    .orderBy(desc(atlasMeetingsTable.createdAt));
+  const output = await Promise.all(
+    meetings.map((meeting) => meetingResponse(meeting, context.workspaceId)),
+  );
+  res.json(GetAtlasMeetingsResponse.parse(output));
+});
+
+router.post("/atlas/meetings", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+  const parsed = CreateAtlasMeetingBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const sourceId = parsed.data.sourceId ?? null;
+  if (sourceId) {
+    const [source] = await db
+      .select({ id: atlasSourcesTable.id })
+      .from(atlasSourcesTable)
+      .where(
+        and(
+          eq(atlasSourcesTable.id, sourceId),
+          eq(atlasSourcesTable.workspaceId, context.workspaceId),
+        ),
+      )
+      .limit(1);
+    if (!source) {
+      res.status(400).json({ error: "Source does not belong to this workspace" });
+      return;
+    }
+  }
+  const [meeting] = await db
+    .insert(atlasMeetingsTable)
+    .values({
+      workspaceId: context.workspaceId,
+      creatorId: context.userId,
+      title: parsed.data.title,
+      scheduledAt: parsed.data.scheduledAt ?? null,
+      participants: parsed.data.participants ?? [],
+      agenda: parsed.data.agenda ?? null,
+      notes: parsed.data.notes ?? null,
+      participantsInformed: parsed.data.participantsInformed,
+      sourceId,
+    })
+    .returning();
+  await activity(context.workspaceId, context.userId, "created", "meeting", meeting.id);
+  res.status(201).json(
+    CreateAtlasMeetingResponse.parse(await meetingResponse(meeting, context.workspaceId)),
+  );
+});
+
+router.post("/atlas/meetings/:meetingId/actions", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+  const params = CreateMeetingActionParams.safeParse(req.params);
+  const parsed = CreateMeetingActionBody.safeParse(req.body);
+  if (!params.success || !parsed.success) {
+    res.status(400).json({ error: params.error?.message ?? parsed.error?.message });
+    return;
+  }
+  const [meeting] = await db
+    .select({ id: atlasMeetingsTable.id })
+    .from(atlasMeetingsTable)
+    .where(
+      and(
+        eq(atlasMeetingsTable.id, params.data.meetingId),
+        eq(atlasMeetingsTable.workspaceId, context.workspaceId),
+      ),
+    )
+    .limit(1);
+  if (!meeting) {
+    res.status(404).json({ error: "Meeting not found" });
+    return;
+  }
+  const [action] = await db
+    .insert(atlasActionsTable)
+    .values({
+      workspaceId: context.workspaceId,
+      meetingId: meeting.id,
+      title: parsed.data.title,
+      owner: parsed.data.owner ?? null,
+      dueAt: parsed.data.dueAt ?? null,
+    })
+    .returning();
+  await activity(context.workspaceId, context.userId, "created", "action", action.id);
+  res.status(201).json(CreateMeetingActionResponse.parse(action));
+});
+
+router.patch(
+  "/atlas/meetings/:meetingId/actions/:actionId",
+  async (req, res): Promise<void> => {
+    const context = await workspaceContext(req, res);
+    if (!context) return;
+    if (!requireSharedWrite(context, res)) return;
+    const params = UpdateMeetingActionParams.safeParse(req.params);
+    const parsed = UpdateMeetingActionBody.safeParse(req.body);
+    if (!params.success || !parsed.success) {
+      res.status(400).json({ error: params.error?.message ?? parsed.error?.message });
+      return;
+    }
+    const [action] = await db
+      .update(atlasActionsTable)
+      .set(parsed.data)
+      .where(
+        and(
+          eq(atlasActionsTable.id, params.data.actionId),
+          eq(atlasActionsTable.meetingId, params.data.meetingId),
+          eq(atlasActionsTable.workspaceId, context.workspaceId),
+        ),
+      )
+      .returning();
+    if (!action) {
+      res.status(404).json({ error: "Action not found" });
+      return;
+    }
+    await activity(context.workspaceId, context.userId, "updated", "action", action.id);
+    res.json(UpdateMeetingActionResponse.parse(action));
+  },
+);
+
+router.get("/atlas/decisions", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const decisions = await db
+    .select()
+    .from(atlasDecisionsTable)
+    .where(eq(atlasDecisionsTable.workspaceId, context.workspaceId))
+    .orderBy(desc(atlasDecisionsTable.createdAt));
+  res.json(GetAtlasDecisionsResponse.parse(decisions));
+});
+
+router.post("/atlas/decisions", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+  const parsed = CreateAtlasDecisionBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const [decision] = await db
+    .insert(atlasDecisionsTable)
+    .values({
+      workspaceId: context.workspaceId,
+      creatorId: context.userId,
+      title: parsed.data.title,
+      domain: parsed.data.domain,
+      context: parsed.data.context,
+      recommendation: parsed.data.recommendation,
+      evidence: parsed.data.evidence,
+      confidence: parsed.data.confidence ?? null,
+    })
+    .returning();
+  await activity(context.workspaceId, context.userId, "created", "decision", decision.id);
+  res.status(201).json(CreateAtlasDecisionResponse.parse(decision));
+});
+
+router.patch("/atlas/decisions/:decisionId/review", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (context.role !== "owner" && context.role !== "admin" && context.role !== "reviewer") {
+    res.status(403).json({ error: "Reviewer role or higher required" });
+    return;
+  }
+  const params = ReviewAtlasDecisionParams.safeParse(req.params);
+  const parsed = ReviewAtlasDecisionBody.safeParse(req.body);
+  if (!params.success || !parsed.success) {
+    res.status(400).json({ error: params.error?.message ?? parsed.error?.message });
+    return;
+  }
+  const [decision] = await db
+    .update(atlasDecisionsTable)
+    .set({
+      status: parsed.data.status,
+      reviewNote: parsed.data.reviewNote,
+      reviewedBy: context.userId,
+      updatedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(atlasDecisionsTable.id, params.data.decisionId),
+        eq(atlasDecisionsTable.workspaceId, context.workspaceId),
+      ),
+    )
+    .returning();
+  if (!decision) {
+    res.status(404).json({ error: "Decision not found" });
+    return;
+  }
+  await activity(context.workspaceId, context.userId, "reviewed", "decision", decision.id);
+  res.json(ReviewAtlasDecisionResponse.parse(decision));
+});
+
+router.get("/atlas/memory/search", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const parsed = SearchAtlasMemoryQueryParams.safeParse(req.query);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const search = `%${parsed.data.q}%`;
+  const [sources, meetings, decisions] = await Promise.all([
+    db
+      .select()
+      .from(atlasSourcesTable)
+      .where(
+        and(
+          eq(atlasSourcesTable.workspaceId, context.workspaceId),
+          eq(atlasSourcesTable.creatorId, context.userId),
+          or(ilike(atlasSourcesTable.title, search), ilike(atlasSourcesTable.content, search)),
+        ),
+      ),
+    db
+      .select()
+      .from(atlasMeetingsTable)
+      .where(
+        and(
+          eq(atlasMeetingsTable.workspaceId, context.workspaceId),
+          or(
+            ilike(atlasMeetingsTable.title, search),
+            ilike(atlasMeetingsTable.notes, search),
+            ilike(atlasMeetingsTable.agenda, search),
+          ),
+        ),
+      ),
+    db
+      .select()
+      .from(atlasDecisionsTable)
+      .where(
+        and(
+          eq(atlasDecisionsTable.workspaceId, context.workspaceId),
+          or(
+            ilike(atlasDecisionsTable.title, search),
+            ilike(atlasDecisionsTable.context, search),
+            ilike(atlasDecisionsTable.recommendation, search),
+          ),
+        ),
+      ),
+  ]);
+  const results = [
+    ...sources.map((source) => ({
+      id: source.id,
+      recordType: "source",
+      title: source.title,
+      excerpt: source.content?.slice(0, 240) ?? null,
+      sourceDate: source.sourceDate,
+    })),
+    ...meetings.map((meeting) => ({
+      id: meeting.id,
+      recordType: "meeting",
+      title: meeting.title,
+      excerpt: meeting.notes?.slice(0, 240) ?? meeting.agenda?.slice(0, 240) ?? null,
+      sourceDate: meeting.scheduledAt,
+    })),
+    ...decisions.map((decision) => ({
+      id: decision.id,
+      recordType: "decision",
+      title: decision.title,
+      excerpt: decision.context.slice(0, 240),
+      sourceDate: decision.createdAt,
+    })),
+  ];
+  res.json(SearchAtlasMemoryResponse.parse(results));
+});
+
+router.get("/atlas/knowledge/graph", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const links = await db
+    .select()
+    .from(atlasKnowledgeLinksTable)
+    .where(eq(atlasKnowledgeLinksTable.workspaceId, context.workspaceId))
+    .orderBy(atlasKnowledgeLinksTable.createdAt);
+  const nodes = new Map<
+    string,
+    { id: string; label: string; recordType: (typeof recordTypes)[number] }
+  >();
+  for (const link of links) {
+    for (const [id, recordType] of [
+      [link.sourceRecordId, link.sourceType],
+      [link.targetRecordId, link.targetType],
+    ] as const) {
+      if (nodes.has(id)) continue;
+      if (recordType === "source") {
+        const [source] = await db
+          .select({ id: atlasSourcesTable.id, title: atlasSourcesTable.title })
+          .from(atlasSourcesTable)
+          .where(
+            and(
+              eq(atlasSourcesTable.id, id),
+              eq(atlasSourcesTable.workspaceId, context.workspaceId),
+            ),
+          )
+          .limit(1);
+        if (source) nodes.set(id, { id, label: source.title, recordType });
+      } else if (recordType === "meeting") {
+        const [meeting] = await db
+          .select({ id: atlasMeetingsTable.id, title: atlasMeetingsTable.title })
+          .from(atlasMeetingsTable)
+          .where(
+            and(
+              eq(atlasMeetingsTable.id, id),
+              eq(atlasMeetingsTable.workspaceId, context.workspaceId),
+            ),
+          )
+          .limit(1);
+        if (meeting) nodes.set(id, { id, label: meeting.title, recordType });
+      } else if (recordType === "decision") {
+        const [decision] = await db
+          .select({ id: atlasDecisionsTable.id, title: atlasDecisionsTable.title })
+          .from(atlasDecisionsTable)
+          .where(
+            and(
+              eq(atlasDecisionsTable.id, id),
+              eq(atlasDecisionsTable.workspaceId, context.workspaceId),
+            ),
+          )
+          .limit(1);
+        if (decision) nodes.set(id, { id, label: decision.title, recordType });
+      }
+    }
+  }
+  const graphLinks = links.filter(
+    (link) => nodes.has(link.sourceRecordId) && nodes.has(link.targetRecordId),
+  );
+  res.json(
+    GetAtlasKnowledgeGraphResponse.parse({
+      nodes: [...nodes.values()],
+      links: graphLinks.map(
+        ({ id, sourceRecordId, targetRecordId, relationship, createdAt }) => ({
+          id,
+          sourceRecordId,
+          targetRecordId,
+          relationship,
+          createdAt,
+        }),
+      ),
+    }),
+  );
+});
+
+router.post("/atlas/knowledge/links", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+  const parsed = CreateAtlasKnowledgeLinkBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  if (parsed.data.sourceRecordId === parsed.data.targetRecordId) {
+    res.status(400).json({ error: "A record cannot be linked to itself" });
+    return;
+  }
+  const workspaceId = context.workspaceId;
+  async function findRecord(recordId: string) {
+    for (const [recordType, table] of [
+      ["source", atlasSourcesTable],
+      ["meeting", atlasMeetingsTable],
+      ["decision", atlasDecisionsTable],
+    ] as const) {
+      const [record] = await db
+        .select({ id: table.id })
+        .from(table)
+        .where(and(eq(table.id, recordId), eq(table.workspaceId, workspaceId)))
+        .limit(1);
+      if (record) return recordType;
+    }
+    return null;
+  }
+  const [sourceType, targetType] = await Promise.all([
+    findRecord(parsed.data.sourceRecordId),
+    findRecord(parsed.data.targetRecordId),
+  ]);
+  if (!sourceType || !targetType) {
+    res.status(400).json({ error: "Both linked records must belong to this workspace" });
+    return;
+  }
+  const [link] = await db
+    .insert(atlasKnowledgeLinksTable)
+    .values({
+      workspaceId: context.workspaceId,
+      sourceRecordId: parsed.data.sourceRecordId,
+      targetRecordId: parsed.data.targetRecordId,
+      sourceType,
+      targetType,
+      relationship: parsed.data.relationship,
+    })
+    .returning();
+  await activity(context.workspaceId, context.userId, "created", "knowledge_link", link.id);
+  res.status(201).json(CreateAtlasKnowledgeLinkResponse.parse(link));
+});
+
+router.delete("/atlas/knowledge/links/:linkId", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+  const params = DeleteAtlasKnowledgeLinkParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const [link] = await db
+    .delete(atlasKnowledgeLinksTable)
+    .where(
+      and(
+        eq(atlasKnowledgeLinksTable.id, params.data.linkId),
+        eq(atlasKnowledgeLinksTable.workspaceId, context.workspaceId),
+      ),
+    )
+    .returning();
+  if (!link) {
+    res.status(404).json({ error: "Knowledge link not found" });
+    return;
+  }
+  await activity(context.workspaceId, context.userId, "deleted", "knowledge_link", link.id);
+  res.status(204).json(DeleteAtlasKnowledgeLinkResponse.parse(undefined));
+});
+
+router.get("/atlas/activity", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const entries = await db
+    .select()
+    .from(atlasActivityTable)
+    .where(eq(atlasActivityTable.workspaceId, context.workspaceId))
+    .orderBy(desc(atlasActivityTable.createdAt));
+  res.json(GetAtlasActivityResponse.parse(entries));
+});
+
+export default router;

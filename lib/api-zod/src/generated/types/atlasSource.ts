@@ -6,6 +6,7 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { AtlasSourceAnalysisStatus } from './atlasSourceAnalysisStatus';
+import type { ProfileSuggestion } from './profileSuggestion';
 import type { SourceKind } from './sourceKind';
 
 export interface AtlasSource {
@@ -19,5 +20,6 @@ export interface AtlasSource {
   permissionConfirmed: boolean;
   profileAnalysisConsent: boolean;
   analysisStatus: AtlasSourceAnalysisStatus;
+  analysisSuggestions: ProfileSuggestion[];
   createdAt: Date;
 }

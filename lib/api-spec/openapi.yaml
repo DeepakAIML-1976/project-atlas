@@ -662,7 +662,7 @@ components:
     AtlasSource:
       type: object
       required:
-        [id, title, kind, contentType, sourceDate, permissionConfirmed, profileAnalysisConsent, analysisStatus, createdAt]
+        [id, title, kind, contentType, sourceDate, permissionConfirmed, profileAnalysisConsent, analysisStatus, analysisSuggestions, createdAt]
       properties:
         id: { type: string }
         title: { type: string }
@@ -674,6 +674,10 @@ components:
         analysisStatus:
           type: string
           enum: [not_requested, suggestions_ready, unsupported_format, failed]
+        analysisSuggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProfileSuggestion"
         createdAt: { type: string, format: date-time }
     SourceAnalysisInput:
       type: object
