@@ -41,7 +41,11 @@ export default function AuthScreen() {
           setError(result.error.message);
           return;
         }
-        await signUp.verifications.sendEmailCode();
+        const sent = await signUp.verifications.sendEmailCode();
+        if (sent.error) {
+          setError(sent.error.message);
+          return;
+        }
         setVerifying(true);
         return;
       }
@@ -61,7 +65,11 @@ export default function AuthScreen() {
           },
         });
       } else if (signIn.status === 'needs_client_trust') {
-        await signIn.mfa.sendEmailCode();
+        const sent = await signIn.mfa.sendEmailCode();
+        if (sent.error) {
+          setError(sent.error.message);
+          return;
+        }
         setVerifying(true);
       } else {
         setError('This sign-in needs another verification step. Please contact your workspace administrator.');
@@ -181,8 +189,13 @@ export default function AuthScreen() {
             <Action label="Verify email" onPress={verify} disabled={!code.trim() || busy} icon="check" />
             <Pressable onPress={async () => {
               try {
-                if (creating) await signUp.verifications.sendEmailCode();
-                else await signIn.mfa.sendEmailCode();
+                const sent = creating
+                  ? await signUp.verifications.sendEmailCode()
+                  : await signIn.mfa.sendEmailCode();
+                if (sent.error) {
+                  setError(sent.error.message);
+                  return;
+                }
                 setError('');
               } catch (caught) {
                 setError(caught instanceof Error ? caught.message : 'A new code could not be sent.');
