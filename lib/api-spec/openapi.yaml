@@ -3,13 +3,17 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Project Atlas API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: Atlas
+    description: Workspace, digital twin, and enterprise memory operations
+  - name: Storage
+    description: Private source uploads
 paths:
   /healthz:
     get:
@@ -24,6 +28,439 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+  /atlas/session:
+    get:
+      operationId: getAtlasSession
+      tags: [Atlas]
+      summary: Get the current user's Atlas workspace context
+      responses:
+        "200":
+          description: Current session and workspace, if one exists
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasSession"
+  /atlas/workspaces:
+    post:
+      operationId: createAtlasWorkspace
+      tags: [Atlas]
+      summary: Create the signed-in user's first workspace
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WorkspaceInput"
+      responses:
+        "201":
+          description: Workspace created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasSession"
+  /atlas/overview:
+    get:
+      operationId: getAtlasOverview
+      tags: [Atlas]
+      summary: Get counts and incomplete setup areas from real workspace records
+      responses:
+        "200":
+          description: Current workspace overview
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasOverview"
+  /atlas/twins/me:
+    get:
+      operationId: getMyTwin
+      tags: [Atlas]
+      summary: Get the signed-in user's digital twin profile
+      responses:
+        "200":
+          description: Twin profile with unknown fields left blank
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TwinProfile"
+  /atlas/twins/me/fields:
+    patch:
+      operationId: updateMyTwinField
+      tags: [Atlas]
+      summary: Set or correct one personally reviewed twin profile field
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TwinFieldInput"
+      responses:
+        "200":
+          description: Updated field
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TwinField"
+  /atlas/twins/me/autonomy:
+    patch:
+      operationId: updateMyTwinAutonomy
+      tags: [Atlas]
+      summary: Set the approved autonomy ceiling for the current user's twin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AutonomyInput"
+      responses:
+        "200":
+          description: Updated autonomy policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AutonomyPolicy"
+  /atlas/sources:
+    get:
+      operationId: getAtlasSources
+      tags: [Atlas]
+      summary: List user-authorized source records
+      responses:
+        "200":
+          description: Source records, empty when none have been provided
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AtlasSource"
+    post:
+      operationId: createAtlasSource
+      tags: [Atlas]
+      summary: Add a user-provided note or an uploaded source reference
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AtlasSourceInput"
+      responses:
+        "201":
+          description: Source record created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasSource"
+  /atlas/sources/{sourceId}:
+    parameters:
+      - name: sourceId
+        in: path
+        required: true
+        schema:
+          type: string
+    get:
+      operationId: getAtlasSource
+      tags: [Atlas]
+      summary: Get a source owned by the current workspace
+      responses:
+        "200":
+          description: Source record
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasSource"
+        "404":
+          description: Source not found
+    delete:
+      operationId: deleteAtlasSource
+      tags: [Atlas]
+      summary: Remove a source and its profile-analysis eligibility
+      responses:
+        "204":
+          description: Source removed
+        "404":
+          description: Source not found
+  /atlas/sources/{sourceId}/analyze:
+    post:
+      operationId: analyzeAtlasSource
+      tags: [Atlas]
+      summary: Request evidence-linked twin profile suggestions from an authorized source
+      parameters:
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SourceAnalysisInput"
+      responses:
+        "200":
+          description: Suggestions for the person to review; none are applied automatically
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SourceAnalysis"
+        "403":
+          description: The source owner has not consented to profile analysis
+  /atlas/meetings:
+    get:
+      operationId: getAtlasMeetings
+      tags: [Atlas]
+      summary: List meetings explicitly added to the workspace
+      responses:
+        "200":
+          description: Meetings, empty when none have been provided
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AtlasMeeting"
+    post:
+      operationId: createAtlasMeeting
+      tags: [Atlas]
+      summary: Record a meeting or briefing using user-provided information
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/MeetingInput"
+      responses:
+        "201":
+          description: Meeting created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasMeeting"
+  /atlas/meetings/{meetingId}/actions:
+    post:
+      operationId: createMeetingAction
+      tags: [Atlas]
+      summary: Add an action item to a recorded meeting
+      parameters:
+        - name: meetingId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActionInput"
+      responses:
+        "201":
+          description: Action item created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingAction"
+  /atlas/meetings/{meetingId}/actions/{actionId}:
+    patch:
+      operationId: updateMeetingAction
+      tags: [Atlas]
+      summary: Update an action item using an explicit user change
+      parameters:
+        - name: meetingId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: actionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ActionUpdate"
+      responses:
+        "200":
+          description: Updated action
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MeetingAction"
+  /atlas/decisions:
+    get:
+      operationId: getAtlasDecisions
+      tags: [Atlas]
+      summary: List decisions explicitly provided to the workspace
+      responses:
+        "200":
+          description: Decisions, empty when none have been provided
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AtlasDecision"
+    post:
+      operationId: createAtlasDecision
+      tags: [Atlas]
+      summary: Record a decision proposal and its supporting evidence
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecisionInput"
+      responses:
+        "201":
+          description: Decision created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasDecision"
+  /atlas/decisions/{decisionId}/review:
+    patch:
+      operationId: reviewAtlasDecision
+      tags: [Atlas]
+      summary: Record a human decision, rejection, or escalation
+      parameters:
+        - name: decisionId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DecisionReview"
+      responses:
+        "200":
+          description: Updated decision
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasDecision"
+  /atlas/memory/search:
+    get:
+      operationId: searchAtlasMemory
+      tags: [Atlas]
+      summary: Search source records that the user has added
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: Search results with provenance
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MemorySearchResult"
+  /atlas/knowledge/graph:
+    get:
+      operationId: getAtlasKnowledgeGraph
+      tags: [Atlas]
+      summary: Get only relationships explicitly added by workspace members
+      responses:
+        "200":
+          description: Knowledge graph; nodes and edges are empty until linked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeGraph"
+  /atlas/knowledge/links:
+    post:
+      operationId: createAtlasKnowledgeLink
+      tags: [Atlas]
+      summary: Link two workspace records with a user-specified relationship
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeLinkInput"
+      responses:
+        "201":
+          description: Relationship created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeLink"
+  /atlas/knowledge/links/{linkId}:
+    delete:
+      operationId: deleteAtlasKnowledgeLink
+      tags: [Atlas]
+      summary: Remove a workspace relationship
+      parameters:
+        - name: linkId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Relationship removed
+  /atlas/activity:
+    get:
+      operationId: getAtlasActivity
+      tags: [Atlas]
+      summary: List recorded user and governance activity
+      responses:
+        "200":
+          description: Activity, empty when no activity has occurred
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityEntry"
+  /storage/uploads/request-url:
+    post:
+      operationId: requestUploadUrl
+      tags: [Storage]
+      summary: Request a private presigned URL for a user-provided source
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UploadUrlRequest"
+      responses:
+        "200":
+          description: Presigned upload URL generated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadUrlResponse"
+  /storage/objects/{objectPath}:
+    get:
+      operationId: getStorageObject
+      tags: [Storage]
+      summary: Read a private source object after workspace authorization
+      parameters:
+        - name: objectPath
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Stored object content
+          content:
+            "*/*":
+              schema:
+                type: string
+                format: binary
+        "404":
+          description: Object not found
 components:
   schemas:
     HealthStatus:
@@ -31,6 +468,386 @@ components:
       properties:
         status:
           type: string
+      required: [status]
+    AtlasSession:
+      type: object
+      required: [userId, workspace, role]
+      properties:
+        userId:
+          type: string
+        workspace:
+          oneOf:
+            - $ref: "#/components/schemas/AtlasWorkspace"
+            - type: "null"
+        role:
+          type: ["string", "null"]
+          enum: [owner, admin, reviewer, viewer, null]
+    WorkspaceInput:
+      type: object
+      required: [name, industry]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 120
+        industry:
+          type: string
+          minLength: 1
+          maxLength: 100
+    AtlasWorkspace:
+      type: object
+      required: [id, name, industry, createdAt]
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        industry:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+    AtlasOverview:
+      type: object
+      required: [workspace, counts, profileCompletion, setupNeeds]
+      properties:
+        workspace:
+          $ref: "#/components/schemas/AtlasWorkspace"
+        counts:
+          $ref: "#/components/schemas/WorkspaceCounts"
+        profileCompletion:
+          type: integer
+          minimum: 0
+          maximum: 100
+        setupNeeds:
+          type: array
+          items:
+            type: string
+    WorkspaceCounts:
+      type: object
+      required: [twins, sources, meetings, pendingDecisions, actions, knowledgeLinks]
+      properties:
+        twins: { type: integer, minimum: 0 }
+        sources: { type: integer, minimum: 0 }
+        meetings: { type: integer, minimum: 0 }
+        pendingDecisions: { type: integer, minimum: 0 }
+        actions: { type: integer, minimum: 0 }
+        knowledgeLinks: { type: integer, minimum: 0 }
+    TwinFieldKey:
+      type: string
+      enum:
+        - role
+        - expertise
+        - priorities
+        - communicationStyle
+        - decisionMethodology
+        - riskTolerance
+        - delegationRules
+        - approvalLimits
+        - meetingBehavior
+        - stakeholderRelationships
+    EvidenceStatus:
+      type: string
+      enum: [unknown, inferred, confirmed]
+    TwinField:
+      type: object
+      required: [key, value, evidenceStatus, sourceIds, confidence, updatedAt]
+      properties:
+        key:
+          $ref: "#/components/schemas/TwinFieldKey"
+        value:
+          type: ["string", "null"]
+        evidenceStatus:
+          $ref: "#/components/schemas/EvidenceStatus"
+        sourceIds:
+          type: array
+          items: { type: string }
+        confidence:
+          type: ["number", "null"]
+          minimum: 0
+          maximum: 1
+        updatedAt:
+          type: ["string", "null"]
+          format: date-time
+    TwinProfile:
+      type: object
+      required: [id, ownerId, displayName, autonomy, fields, profileCompletion]
+      properties:
+        id: { type: string }
+        ownerId: { type: string }
+        displayName: { type: ["string", "null"] }
+        autonomy:
+          $ref: "#/components/schemas/AutonomyPolicy"
+        fields:
+          type: array
+          items:
+            $ref: "#/components/schemas/TwinField"
+        profileCompletion:
+          type: integer
+          minimum: 0
+          maximum: 100
+    TwinFieldInput:
+      type: object
+      required: [key, value]
+      properties:
+        key:
+          $ref: "#/components/schemas/TwinFieldKey"
+        value:
+          type: string
+          maxLength: 6000
+        sourceIds:
+          type: array
+          items: { type: string }
+    AutonomyInput:
+      type: object
+      required: [level, reason]
+      properties:
+        level:
+          type: integer
+          minimum: 1
+          maximum: 10
+        reason:
+          type: string
+          minLength: 1
+          maxLength: 1000
+    AutonomyPolicy:
+      type: object
+      required: [level, label, approvalRequired, updatedAt]
+      properties:
+        level:
+          type: integer
+          minimum: 1
+          maximum: 10
+        label:
+          type: string
+        approvalRequired:
+          type: boolean
+        updatedAt:
+          type: ["string", "null"]
+          format: date-time
+    SourceKind:
+      type: string
+      enum: [note, email, chat, meeting, decision, document, other]
+    AnalysisConsent:
+      type: object
+      required: [permissionConfirmed, profileAnalysisConsent]
+      properties:
+        permissionConfirmed:
+          type: boolean
+        profileAnalysisConsent:
+          type: boolean
+    AtlasSourceInput:
+      type: object
+      required: [title, kind, permissionConfirmed, profileAnalysisConsent]
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 240
+        kind:
+          $ref: "#/components/schemas/SourceKind"
+        content:
+          type: ["string", "null"]
+        objectPath:
+          type: ["string", "null"]
+        contentType:
+          type: ["string", "null"]
+        sourceDate:
+          type: ["string", "null"]
+          format: date-time
+        permissionConfirmed:
+          type: boolean
+        profileAnalysisConsent:
+          type: boolean
+    AtlasSource:
+      type: object
       required:
-        - status
+        [id, title, kind, contentType, sourceDate, permissionConfirmed, profileAnalysisConsent, analysisStatus, createdAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        kind: { $ref: "#/components/schemas/SourceKind" }
+        contentType: { type: ["string", "null"] }
+        sourceDate: { type: ["string", "null"], format: date-time }
+        permissionConfirmed: { type: boolean }
+        profileAnalysisConsent: { type: boolean }
+        analysisStatus:
+          type: string
+          enum: [not_requested, suggestions_ready, unsupported_format, failed]
+        createdAt: { type: string, format: date-time }
+    SourceAnalysisInput:
+      type: object
+      required: [confirmAnalysis]
+      properties:
+        confirmAnalysis:
+          type: boolean
+          const: true
+    ProfileSuggestion:
+      type: object
+      required: [key, suggestedValue, evidence, confidence]
+      properties:
+        key:
+          $ref: "#/components/schemas/TwinFieldKey"
+        suggestedValue: { type: string }
+        evidence: { type: string }
+        confidence: { type: number, minimum: 0, maximum: 1 }
+    SourceAnalysis:
+      type: object
+      required: [sourceId, suggestions]
+      properties:
+        sourceId: { type: string }
+        suggestions:
+          type: array
+          items:
+            $ref: "#/components/schemas/ProfileSuggestion"
+    MeetingInput:
+      type: object
+      required: [title, participantsInformed]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 240 }
+        scheduledAt: { type: ["string", "null"], format: date-time }
+        participants:
+          type: array
+          items: { type: string }
+        agenda: { type: ["string", "null"] }
+        notes: { type: ["string", "null"] }
+        sourceId: { type: ["string", "null"] }
+        participantsInformed:
+          type: boolean
+    AtlasMeeting:
+      type: object
+      required: [id, title, scheduledAt, participants, agenda, notes, participantsInformed, actions, createdAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        scheduledAt: { type: ["string", "null"], format: date-time }
+        participants: { type: array, items: { type: string } }
+        agenda: { type: ["string", "null"] }
+        notes: { type: ["string", "null"] }
+        participantsInformed: { type: boolean }
+        sourceId: { type: ["string", "null"] }
+        actions:
+          type: array
+          items: { $ref: "#/components/schemas/MeetingAction" }
+        createdAt: { type: string, format: date-time }
+    ActionInput:
+      type: object
+      required: [title]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 500 }
+        owner: { type: ["string", "null"] }
+        dueAt: { type: ["string", "null"], format: date-time }
+    ActionUpdate:
+      type: object
+      properties:
+        title: { type: string, minLength: 1, maxLength: 500 }
+        owner: { type: ["string", "null"] }
+        dueAt: { type: ["string", "null"], format: date-time }
+        status:
+          type: string
+          enum: [open, in_progress, blocked, complete]
+    MeetingAction:
+      type: object
+      required: [id, meetingId, title, owner, dueAt, status, createdAt]
+      properties:
+        id: { type: string }
+        meetingId: { type: string }
+        title: { type: string }
+        owner: { type: ["string", "null"] }
+        dueAt: { type: ["string", "null"], format: date-time }
+        status:
+          type: string
+          enum: [open, in_progress, blocked, complete]
+        createdAt: { type: string, format: date-time }
+    DecisionInput:
+      type: object
+      required: [title, domain, context, recommendation, evidence]
+      properties:
+        title: { type: string, minLength: 1, maxLength: 240 }
+        domain: { type: string, minLength: 1, maxLength: 120 }
+        context: { type: string, minLength: 1, maxLength: 6000 }
+        recommendation: { type: string, minLength: 1, maxLength: 3000 }
+        evidence: { type: array, items: { type: string } }
+        confidence: { type: ["number", "null"], minimum: 0, maximum: 1 }
+    DecisionReview:
+      type: object
+      required: [status, reviewNote]
+      properties:
+        status: { type: string, enum: [approved, rejected, escalated] }
+        reviewNote: { type: string, maxLength: 3000 }
+    AtlasDecision:
+      type: object
+      required: [id, title, domain, context, recommendation, evidence, confidence, status, reviewNote, createdAt, updatedAt]
+      properties:
+        id: { type: string }
+        title: { type: string }
+        domain: { type: string }
+        context: { type: string }
+        recommendation: { type: string }
+        evidence: { type: array, items: { type: string } }
+        confidence: { type: ["number", "null"], minimum: 0, maximum: 1 }
+        status: { type: string, enum: [pending, approved, rejected, escalated] }
+        reviewNote: { type: ["string", "null"] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    MemorySearchResult:
+      type: object
+      required: [id, recordType, title, excerpt, sourceDate]
+      properties:
+        id: { type: string }
+        recordType: { type: string, enum: [source, meeting, decision] }
+        title: { type: string }
+        excerpt: { type: ["string", "null"] }
+        sourceDate: { type: ["string", "null"], format: date-time }
+    KnowledgeLinkInput:
+      type: object
+      required: [sourceRecordId, targetRecordId, relationship]
+      properties:
+        sourceRecordId: { type: string }
+        targetRecordId: { type: string }
+        relationship: { type: string, minLength: 1, maxLength: 160 }
+    KnowledgeLink:
+      type: object
+      required: [id, sourceRecordId, targetRecordId, relationship, createdAt]
+      properties:
+        id: { type: string }
+        sourceRecordId: { type: string }
+        targetRecordId: { type: string }
+        relationship: { type: string }
+        createdAt: { type: string, format: date-time }
+    KnowledgeNode:
+      type: object
+      required: [id, label, recordType]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        recordType: { type: string, enum: [source, meeting, decision] }
+    KnowledgeGraph:
+      type: object
+      required: [nodes, links]
+      properties:
+        nodes: { type: array, items: { $ref: "#/components/schemas/KnowledgeNode" } }
+        links: { type: array, items: { $ref: "#/components/schemas/KnowledgeLink" } }
+    ActivityEntry:
+      type: object
+      required: [id, action, recordType, recordId, createdAt]
+      properties:
+        id: { type: string }
+        action: { type: string }
+        recordType: { type: string }
+        recordId: { type: string }
+        createdAt: { type: string, format: date-time }
+    UploadUrlRequest:
+      type: object
+      required: [name, size, contentType]
+      properties:
+        name: { type: string, minLength: 1 }
+        size: { type: integer, minimum: 1 }
+        contentType: { type: string, minLength: 1 }
+    UploadUrlResponse:
+      type: object
+      required: [uploadURL, objectPath]
+      properties:
+        uploadURL: { type: string, format: uri }
+        objectPath: { type: string }
 

@@ -1,0 +1,28 @@
+kind = "web"
+previewPath = "/"
+title = "Project Atlas"
+description = "A consent-first Enterprise Digital Twin Suite. The workspace starts empty and helps each person create a governed digital twin from information they explicitly provide or connect."
+version = "1.0.0"
+id = "artifacts/atlas-web"
+router = "path"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 19538
+
+[services.development]
+run = "pnpm --filter @workspace/atlas-web run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/atlas-web", "run", "build" ]
+serve = "static"
+publicDir = "artifacts/atlas-web/dist/public"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "19538"
+BASE_PATH = "/"
