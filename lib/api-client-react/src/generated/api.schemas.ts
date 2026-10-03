@@ -491,10 +491,157 @@ export interface UploadUrlResponse {
   objectPath: string;
 }
 
+export interface AtlasEmailDraft {
+  id: string;
+  sender: string;
+  subject: string;
+  incomingBody: string;
+  twinDraftResponse: string;
+  /** @nullable */
+  reasoning?: string | null;
+  /** @nullable */
+  confidence?: number | null;
+  status: string;
+  /** @nullable */
+  authorizedAt?: string | null;
+  createdAt: string;
+}
+
+export interface AtlasMeetingContribution {
+  id: string;
+  meetingId: string;
+  topic: string;
+  twinProposedStatement: string;
+  /** @nullable */
+  engineeringBasis?: string | null;
+  status: string;
+  createdAt: string;
+}
+
+export interface AtlasMeetingTrigger {
+  id: string;
+  liveMeetingId: string;
+  /** @nullable */
+  speakerName?: string | null;
+  triggerPhrase: string;
+  questionAsked: string;
+  twinProposedResponse: string;
+  outputMode: string;
+  humanAlertStatus: string;
+  createdAt: string;
+}
+
+export interface AtlasKnowledgeUnit {
+  id: string;
+  domain: string;
+  topic: string;
+  /** @nullable */
+  problem?: string | null;
+  /** @nullable */
+  context?: string | null;
+  /** @nullable */
+  experience?: string | null;
+  /** @nullable */
+  reasoning?: string | null;
+  /** @nullable */
+  decision?: string | null;
+  /** @nullable */
+  outcome?: string | null;
+  /** @nullable */
+  lesson?: string | null;
+  /** @nullable */
+  heuristic?: string | null;
+  /** @nullable */
+  exception?: string | null;
+  /** @nullable */
+  sourceRecordId?: string | null;
+  confidence: number;
+  validationStatus: string;
+  createdAt: string;
+}
+
+export interface KnowledgeUnitInput {
+  /** @minLength 1 */
+  domain: string;
+  /** @minLength 1 */
+  topic: string;
+  /** @nullable */
+  problem?: string | null;
+  /** @nullable */
+  context?: string | null;
+  /** @nullable */
+  experience?: string | null;
+  /** @nullable */
+  reasoning?: string | null;
+  /** @nullable */
+  decision?: string | null;
+  /** @nullable */
+  outcome?: string | null;
+  /** @nullable */
+  lesson?: string | null;
+  /** @nullable */
+  heuristic?: string | null;
+  /** @nullable */
+  exception?: string | null;
+}
+
+export interface AuthorizationInboxResponse {
+  pendingEmails: AtlasEmailDraft[];
+  pendingMeetingContributions: AtlasMeetingContribution[];
+  pendingDecisions: AtlasDecision[];
+  pendingMeetingTriggers: AtlasMeetingTrigger[];
+  totalPending: number;
+}
+
+export type AuthorizeItemInputItemType = typeof AuthorizeItemInputItemType[keyof typeof AuthorizeItemInputItemType];
+
+
+export const AuthorizeItemInputItemType = {
+  email_draft: 'email_draft',
+  meeting_contribution: 'meeting_contribution',
+  decision: 'decision',
+  meeting_trigger: 'meeting_trigger',
+} as const;
+
+export type AuthorizeItemInputAction = typeof AuthorizeItemInputAction[keyof typeof AuthorizeItemInputAction];
+
+
+export const AuthorizeItemInputAction = {
+  authorize: 'authorize',
+  edit_authorize: 'edit_authorize',
+  reject: 'reject',
+} as const;
+
+export interface AuthorizeItemInput {
+  itemType: AuthorizeItemInputItemType;
+  itemId: string;
+  action: AuthorizeItemInputAction;
+  /** @nullable */
+  editedContent?: string | null;
+  /** @nullable */
+  rejectionReason?: string | null;
+}
+
+export interface AuthorizeItemResponse {
+  success: boolean;
+  message: string;
+  /** @nullable */
+  learnedKnowledgeUnit?: AtlasKnowledgeUnit | null;
+}
+
+export interface KnowledgeUnitsResponse {
+  knowledgeUnits: AtlasKnowledgeUnit[];
+}
+
 export type SearchAtlasMemoryParams = {
 /**
  * @minLength 1
  */
 q: string;
+};
+
+export type GetKnowledgeUnitsParams = {
+domain?: string;
+query?: string;
 };
 

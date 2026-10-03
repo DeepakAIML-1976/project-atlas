@@ -41,6 +41,12 @@ import {
   UpdateMyTwinFieldResponse,
   CreateAtlasWorkspaceBody,
   CreateAtlasWorkspaceResponse,
+  GetAuthorizationInboxResponse,
+  AuthorizeInboxItemBody,
+  AuthorizeInboxItemResponse,
+  GetKnowledgeUnitsQueryParams,
+  GetKnowledgeUnitsResponse,
+  CreateKnowledgeUnitBody,
 } from "@workspace/api-zod";
 import {
   atlasActionsTable,
@@ -54,6 +60,10 @@ import {
   atlasTwinsTable,
   atlasUploadsTable,
   atlasWorkspacesTable,
+  atlasEmailDraftsTable,
+  atlasMeetingContributionsTable,
+  atlasMeetingTriggersTable,
+  atlasKnowledgeUnitsTable,
   db,
 } from "@workspace/db";
 import {
@@ -65,6 +75,7 @@ import {
   userTwin,
   workspaceContext,
 } from "../lib/atlas";
+import { extractCorrectionKnowledgeUnit } from "../lib/atlasAI";
 
 const router: IRouter = Router();
 const recordTypes = ["source", "meeting", "decision"] as const;
@@ -1053,6 +1064,369 @@ router.get("/atlas/activity", async (req, res): Promise<void> => {
     .where(eq(atlasActivityTable.workspaceId, context.workspaceId))
     .orderBy(desc(atlasActivityTable.createdAt));
   res.json(GetAtlasActivityResponse.parse(entries));
+});
+
+router.get("/atlas/authorization-inbox", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+
+  const pendingEmails = await db
+    .select()
+    .from(atlasEmailDraftsTable)
+    .where(
+      and(
+        eq(atlasEmailDraftsTable.workspaceId, context.workspaceId),
+        eq(atlasEmailDraftsTable.status, "pending_authorization"),
+      ),
+    )
+    .orderBy(desc(atlasEmailDraftsTable.createdAt));
+
+  const pendingMeetingContributions = await db
+    .select()
+    .from(atlasMeetingContributionsTable)
+    .where(
+      and(
+        eq(atlasMeetingContributionsTable.workspaceId, context.workspaceId),
+        eq(atlasMeetingContributionsTable.status, "pending_authorization"),
+      ),
+    )
+    .orderBy(desc(atlasMeetingContributionsTable.createdAt));
+
+  const pendingDecisions = await db
+    .select()
+    .from(atlasDecisionsTable)
+    .where(
+      and(
+        eq(atlasDecisionsTable.workspaceId, context.workspaceId),
+        eq(atlasDecisionsTable.status, "pending"),
+      ),
+    )
+    .orderBy(desc(atlasDecisionsTable.createdAt));
+
+  const pendingMeetingTriggers = await db
+    .select()
+    .from(atlasMeetingTriggersTable)
+    .where(
+      and(
+        eq(atlasMeetingTriggersTable.workspaceId, context.workspaceId),
+        eq(atlasMeetingTriggersTable.humanAlertStatus, "notified"),
+      ),
+    )
+    .orderBy(desc(atlasMeetingTriggersTable.createdAt));
+
+  const totalPending =
+    pendingEmails.length +
+    pendingMeetingContributions.length +
+    pendingDecisions.length +
+    pendingMeetingTriggers.length;
+
+  res.json(
+    GetAuthorizationInboxResponse.parse({
+      pendingEmails,
+      pendingMeetingContributions,
+      pendingDecisions,
+      pendingMeetingTriggers,
+      totalPending,
+    }),
+  );
+});
+
+router.post("/atlas/authorization-inbox/authorize", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const parsed = AuthorizeInboxItemBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const { itemType, itemId, action, editedContent, rejectionReason } = parsed.data;
+  let learnedKnowledgeUnit = null;
+
+  if (itemType === "email_draft") {
+    const [draft] = await db
+      .select()
+      .from(atlasEmailDraftsTable)
+      .where(
+        and(
+          eq(atlasEmailDraftsTable.id, itemId),
+          eq(atlasEmailDraftsTable.workspaceId, context.workspaceId),
+        ),
+      );
+    if (!draft) {
+      res.status(404).json({ error: "Email draft not found" });
+      return;
+    }
+
+    const finalStatus = action === "reject" ? "rejected" : "authorized";
+    await db
+      .update(atlasEmailDraftsTable)
+      .set({
+        status: finalStatus,
+        authorizedAt: action === "reject" ? null : new Date(),
+        twinDraftResponse: editedContent ? editedContent : draft.twinDraftResponse,
+      })
+      .where(eq(atlasEmailDraftsTable.id, itemId));
+
+    if (action === "edit_authorize" || action === "reject") {
+      const correction = editedContent || rejectionReason || "Draft rejected";
+      const extracted = await extractCorrectionKnowledgeUnit(
+        "email_draft",
+        draft.twinDraftResponse,
+        correction,
+        `Subject: ${draft.subject}, Sender: ${draft.sender}`,
+      );
+      const [ku] = await db
+        .insert(atlasKnowledgeUnitsTable)
+        .values({
+          workspaceId: context.workspaceId,
+          ...extracted,
+          sourceRecordId: draft.id,
+          confidence: 1.0,
+          validationStatus: "validated",
+        })
+        .returning();
+      learnedKnowledgeUnit = ku;
+    }
+  } else if (itemType === "meeting_contribution") {
+    const [contrib] = await db
+      .select()
+      .from(atlasMeetingContributionsTable)
+      .where(
+        and(
+          eq(atlasMeetingContributionsTable.id, itemId),
+          eq(atlasMeetingContributionsTable.workspaceId, context.workspaceId),
+        ),
+      );
+    if (!contrib) {
+      res.status(404).json({ error: "Meeting contribution not found" });
+      return;
+    }
+
+    const finalStatus = action === "reject" ? "rejected" : "authorized";
+    await db
+      .update(atlasMeetingContributionsTable)
+      .set({
+        status: finalStatus,
+        twinProposedStatement: editedContent ? editedContent : contrib.twinProposedStatement,
+      })
+      .where(eq(atlasMeetingContributionsTable.id, itemId));
+
+    if (action === "edit_authorize" || action === "reject") {
+      const correction = editedContent || rejectionReason || "Statement rejected";
+      const extracted = await extractCorrectionKnowledgeUnit(
+        "meeting_contribution",
+        contrib.twinProposedStatement,
+        correction,
+        `Meeting Topic: ${contrib.topic}`,
+      );
+      const [ku] = await db
+        .insert(atlasKnowledgeUnitsTable)
+        .values({
+          workspaceId: context.workspaceId,
+          ...extracted,
+          sourceRecordId: contrib.id,
+          confidence: 1.0,
+          validationStatus: "validated",
+        })
+        .returning();
+      learnedKnowledgeUnit = ku;
+    }
+  } else if (itemType === "decision") {
+    const [decision] = await db
+      .select()
+      .from(atlasDecisionsTable)
+      .where(
+        and(
+          eq(atlasDecisionsTable.id, itemId),
+          eq(atlasDecisionsTable.workspaceId, context.workspaceId),
+        ),
+      );
+    if (!decision) {
+      res.status(404).json({ error: "Decision not found" });
+      return;
+    }
+
+    const newStatus = action === "reject" ? "rejected" : "approved";
+    await db
+      .update(atlasDecisionsTable)
+      .set({
+        status: newStatus,
+        reviewNote: rejectionReason || (editedContent ? `Edited & approved: ${editedContent}` : "Approved via Executive Inbox"),
+        recommendation: editedContent ? editedContent : decision.recommendation,
+        reviewedBy: context.userId,
+        updatedAt: new Date(),
+      })
+      .where(eq(atlasDecisionsTable.id, itemId));
+
+    if (action === "edit_authorize" || action === "reject") {
+      const correction = editedContent || rejectionReason || "Decision rejected";
+      const extracted = await extractCorrectionKnowledgeUnit(
+        "decision",
+        decision.recommendation,
+        correction,
+        `Title: ${decision.title}, Domain: ${decision.domain}, Context: ${decision.context}`,
+      );
+      const [ku] = await db
+        .insert(atlasKnowledgeUnitsTable)
+        .values({
+          workspaceId: context.workspaceId,
+          ...extracted,
+          sourceRecordId: decision.id,
+          confidence: 1.0,
+          validationStatus: "validated",
+        })
+        .returning();
+      learnedKnowledgeUnit = ku;
+    }
+  } else if (itemType === "meeting_trigger") {
+    const [trig] = await db
+      .select()
+      .from(atlasMeetingTriggersTable)
+      .where(
+        and(
+          eq(atlasMeetingTriggersTable.id, itemId),
+          eq(atlasMeetingTriggersTable.workspaceId, context.workspaceId),
+        ),
+      );
+    if (!trig) {
+      res.status(404).json({ error: "Meeting trigger alert not found" });
+      return;
+    }
+
+    const finalStatus = action === "reject" ? "dismissed" : "responded";
+    await db
+      .update(atlasMeetingTriggersTable)
+      .set({
+        humanAlertStatus: finalStatus,
+        twinProposedResponse: editedContent ? editedContent : trig.twinProposedResponse,
+      })
+      .where(eq(atlasMeetingTriggersTable.id, itemId));
+
+    if (action === "edit_authorize" || action === "reject") {
+      const correction = editedContent || rejectionReason || "Response dismissed";
+      const extracted = await extractCorrectionKnowledgeUnit(
+        "meeting_trigger",
+        trig.twinProposedResponse,
+        correction,
+        `Speaker: ${trig.speakerName || "Unknown"}, Question: ${trig.questionAsked}`,
+      );
+      const [ku] = await db
+        .insert(atlasKnowledgeUnitsTable)
+        .values({
+          workspaceId: context.workspaceId,
+          ...extracted,
+          sourceRecordId: trig.id,
+          confidence: 1.0,
+          validationStatus: "validated",
+        })
+        .returning();
+      learnedKnowledgeUnit = ku;
+    }
+  }
+
+  await activity(context.workspaceId, context.userId, action, itemType, itemId);
+
+  res.json(
+    AuthorizeInboxItemResponse.parse({
+      success: true,
+      message: `Action ${action} completed successfully`,
+      learnedKnowledgeUnit: learnedKnowledgeUnit ?? null,
+    }),
+  );
+});
+
+router.get("/atlas/knowledge-units", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+
+  const parsed = GetKnowledgeUnitsQueryParams.safeParse(req.query);
+  const domainFilter = parsed.success ? parsed.data.domain : undefined;
+  const searchFilter = parsed.success ? parsed.data.query : undefined;
+
+  const items = await db
+    .select()
+    .from(atlasKnowledgeUnitsTable)
+    .where(eq(atlasKnowledgeUnitsTable.workspaceId, context.workspaceId))
+    .orderBy(desc(atlasKnowledgeUnitsTable.createdAt));
+
+  let filtered = items;
+  if (domainFilter) {
+    filtered = filtered.filter((item) => item.domain.toLowerCase() === domainFilter.toLowerCase());
+  }
+  if (searchFilter) {
+    const q = searchFilter.toLowerCase();
+    filtered = filtered.filter(
+      (item) =>
+        item.topic.toLowerCase().includes(q) ||
+        (item.heuristic && item.heuristic.toLowerCase().includes(q)) ||
+        (item.reasoning && item.reasoning.toLowerCase().includes(q)) ||
+        (item.domain && item.domain.toLowerCase().includes(q)),
+    );
+  }
+
+  res.json(
+    GetKnowledgeUnitsResponse.parse({
+      knowledgeUnits: filtered,
+    }),
+  );
+});
+
+router.post("/atlas/knowledge-units", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const parsed = CreateKnowledgeUnitBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const [created] = await db
+    .insert(atlasKnowledgeUnitsTable)
+    .values({
+      workspaceId: context.workspaceId,
+      domain: parsed.data.domain,
+      topic: parsed.data.topic,
+      problem: parsed.data.problem ?? null,
+      context: parsed.data.context ?? null,
+      experience: parsed.data.experience ?? "Directly taught by human SME",
+      reasoning: parsed.data.reasoning ?? null,
+      decision: parsed.data.decision ?? null,
+      outcome: parsed.data.outcome ?? null,
+      lesson: parsed.data.lesson ?? null,
+      heuristic: parsed.data.heuristic ?? null,
+      exception: parsed.data.exception ?? null,
+      confidence: 1.0,
+      validationStatus: "validated",
+    })
+    .returning();
+
+  await activity(context.workspaceId, context.userId, "created", "knowledge_unit", created.id);
+
+  res.status(201).json(created);
+});
+
+router.delete("/atlas/knowledge-units/:id", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const id = req.params.id;
+  await db
+    .delete(atlasKnowledgeUnitsTable)
+    .where(
+      and(
+        eq(atlasKnowledgeUnitsTable.id, id),
+        eq(atlasKnowledgeUnitsTable.workspaceId, context.workspaceId),
+      ),
+    );
+
+  await activity(context.workspaceId, context.userId, "deleted", "knowledge_unit", id);
+  res.status(204).send();
 });
 
 export default router;

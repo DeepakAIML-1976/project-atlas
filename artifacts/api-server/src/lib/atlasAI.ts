@@ -52,3 +52,93 @@ export async function suggestProfileFields(sourceText: string): Promise<ProfileS
     return [{ key: key as ProfileSuggestion["key"], suggestedValue: value.trim(), evidence, confidence }];
   });
 }
+
+export interface ExtractedKnowledgeUnit {
+  domain: string;
+  topic: string;
+  problem?: string;
+  context?: string;
+  reasoning?: string;
+  heuristic?: string;
+  lesson?: string;
+}
+
+export async function extractCorrectionKnowledgeUnit(
+  itemType: string,
+  originalContent: string,
+  correctionOrReason: string,
+  contextInfo: string,
+): Promise<ExtractedKnowledgeUnit> {
+  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
+  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+
+  if (baseURL && apiKey) {
+    try {
+      const client = new OpenAI({ baseURL, apiKey });
+      const response = await client.chat.completions.create({
+        model: "gpt-5.4-mini",
+        max_completion_tokens: 4096,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: `You are an expert knowledge engineer extracting tacit engineering heuristics and reasoning patterns from human SME corrections.
+The human SME reviewed an AI Digital Twin draft and either edited it or rejected it with feedback.
+Analyze the difference between what the twin proposed and what the human specified to distill a reusable rule/heuristic.
+
+Return ONLY a JSON object with this format:
+{
+  "domain": "e.g. Piping Engineering / Project Governance / Materials & Integrity",
+  "topic": "e.g. Flange Rating Selection / Sour Gas Material Spec",
+  "problem": "Brief summary of the engineering problem or query context",
+  "context": "Context information",
+  "reasoning": "The underlying rationale behind the human's edit or rejection",
+  "heuristic": "A clear, actionable rule/heuristic for future AI decisions (e.g. 'Always require NACE MR0175 compliance for sour gas service (>0.05 psia H2S partial pressure)')",
+  "lesson": "Key lesson learned for the AI Digital Twin"
+}`,
+          },
+          {
+            role: "user",
+            content: `Item Type: ${itemType}
+Context: ${contextInfo}
+Original Twin Draft: ${originalContent}
+Human Edit/Rejection: ${correctionOrReason}`,
+          },
+        ],
+      });
+      const raw = response.choices[0]?.message?.content;
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.domain && parsed.topic) {
+          return {
+            domain: String(parsed.domain),
+            topic: String(parsed.topic),
+            problem: parsed.problem ? String(parsed.problem) : undefined,
+            context: parsed.context ? String(parsed.context) : contextInfo,
+            reasoning: parsed.reasoning ? String(parsed.reasoning) : undefined,
+            heuristic: parsed.heuristic ? String(parsed.heuristic) : undefined,
+            lesson: parsed.lesson ? String(parsed.lesson) : undefined,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn("AI Knowledge extraction failed, using fallback:", err);
+    }
+  }
+
+  const domain = contextInfo.toLowerCase().includes("pipe") || contextInfo.toLowerCase().includes("flange") || contextInfo.toLowerCase().includes("valve")
+    ? "Piping Engineering"
+    : "Engineering Heuristics";
+  const topic = `Correction on ${itemType.replace("_", " ")}: ${contextInfo.slice(0, 40)}`;
+  const heuristic = `When handling ${contextInfo.slice(0, 60)}, owner prefers: ${correctionOrReason.slice(0, 150)}`;
+
+  return {
+    domain,
+    topic,
+    problem: `AI draft required human correction for ${contextInfo.slice(0, 60)}`,
+    context: contextInfo,
+    reasoning: `Human SME overrode draft with: ${correctionOrReason}`,
+    heuristic,
+    lesson: `Twin model adjusted based on executive authorization inbox feedback`,
+  };
+}

@@ -422,6 +422,90 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/ActivityEntry"
+  /atlas/authorization-inbox:
+    get:
+      operationId: getAuthorizationInbox
+      tags: [Atlas]
+      summary: List all pending authorization items across email drafts, meeting contributions, decisions, and trigger alerts
+      responses:
+        "200":
+          description: Pending inbox items requiring human sign-off
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthorizationInboxResponse"
+  /atlas/authorization-inbox/authorize:
+    post:
+      operationId: authorizeInboxItem
+      tags: [Atlas]
+      summary: Authorize, edit & authorize, or reject a pending digital twin action
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthorizeItemInput"
+      responses:
+        "200":
+          description: Action processed successfully with optional learned knowledge unit
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthorizeItemResponse"
+  /atlas/knowledge-units:
+    get:
+      operationId: getKnowledgeUnits
+      tags: [Atlas]
+      summary: Retrieve tacit knowledge units and heuristics learned by or taught to the digital twin
+      parameters:
+        - name: domain
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: query
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Tacit knowledge units and heuristics list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/KnowledgeUnitsResponse"
+    post:
+      operationId: createKnowledgeUnit
+      tags: [Atlas]
+      summary: Manually teach or add a tacit knowledge unit / heuristic to the twin
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/KnowledgeUnitInput"
+      responses:
+        "201":
+          description: Knowledge unit created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasKnowledgeUnit"
+  /atlas/knowledge-units/{id}:
+    delete:
+      operationId: deleteKnowledgeUnit
+      tags: [Atlas]
+      summary: Delete a tacit knowledge unit
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Knowledge unit deleted
   /storage/uploads/request-url:
     post:
       operationId: requestUploadUrl
@@ -854,4 +938,124 @@ components:
       properties:
         uploadURL: { type: string, format: uri }
         objectPath: { type: string }
+    AtlasEmailDraft:
+      type: object
+      required: [id, sender, subject, incomingBody, twinDraftResponse, status, createdAt]
+      properties:
+        id: { type: string }
+        sender: { type: string }
+        subject: { type: string }
+        incomingBody: { type: string }
+        twinDraftResponse: { type: string }
+        reasoning: { type: ["string", "null"] }
+        confidence: { type: ["number", "null"] }
+        status: { type: string }
+        authorizedAt: { type: ["string", "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    AtlasMeetingContribution:
+      type: object
+      required: [id, meetingId, topic, twinProposedStatement, status, createdAt]
+      properties:
+        id: { type: string }
+        meetingId: { type: string }
+        topic: { type: string }
+        twinProposedStatement: { type: string }
+        engineeringBasis: { type: ["string", "null"] }
+        status: { type: string }
+        createdAt: { type: string, format: date-time }
+    AtlasMeetingTrigger:
+      type: object
+      required: [id, liveMeetingId, triggerPhrase, questionAsked, twinProposedResponse, outputMode, humanAlertStatus, createdAt]
+      properties:
+        id: { type: string }
+        liveMeetingId: { type: string }
+        speakerName: { type: ["string", "null"] }
+        triggerPhrase: { type: string }
+        questionAsked: { type: string }
+        twinProposedResponse: { type: string }
+        outputMode: { type: string }
+        humanAlertStatus: { type: string }
+        createdAt: { type: string, format: date-time }
+    AtlasKnowledgeUnit:
+      type: object
+      required: [id, domain, topic, confidence, validationStatus, createdAt]
+      properties:
+        id: { type: string }
+        domain: { type: string }
+        topic: { type: string }
+        problem: { type: ["string", "null"] }
+        context: { type: ["string", "null"] }
+        experience: { type: ["string", "null"] }
+        reasoning: { type: ["string", "null"] }
+        decision: { type: ["string", "null"] }
+        outcome: { type: ["string", "null"] }
+        lesson: { type: ["string", "null"] }
+        heuristic: { type: ["string", "null"] }
+        exception: { type: ["string", "null"] }
+        sourceRecordId: { type: ["string", "null"] }
+        confidence: { type: number }
+        validationStatus: { type: string }
+        createdAt: { type: string, format: date-time }
+    KnowledgeUnitInput:
+      type: object
+      required: [domain, topic]
+      properties:
+        domain: { type: string, minLength: 1 }
+        topic: { type: string, minLength: 1 }
+        problem: { type: ["string", "null"] }
+        context: { type: ["string", "null"] }
+        experience: { type: ["string", "null"] }
+        reasoning: { type: ["string", "null"] }
+        decision: { type: ["string", "null"] }
+        outcome: { type: ["string", "null"] }
+        lesson: { type: ["string", "null"] }
+        heuristic: { type: ["string", "null"] }
+        exception: { type: ["string", "null"] }
+    AuthorizationInboxResponse:
+      type: object
+      required: [pendingEmails, pendingMeetingContributions, pendingDecisions, pendingMeetingTriggers, totalPending]
+      properties:
+        pendingEmails:
+          type: array
+          items: { $ref: "#/components/schemas/AtlasEmailDraft" }
+        pendingMeetingContributions:
+          type: array
+          items: { $ref: "#/components/schemas/AtlasMeetingContribution" }
+        pendingDecisions:
+          type: array
+          items: { $ref: "#/components/schemas/AtlasDecision" }
+        pendingMeetingTriggers:
+          type: array
+          items: { $ref: "#/components/schemas/AtlasMeetingTrigger" }
+        totalPending: { type: integer }
+    AuthorizeItemInput:
+      type: object
+      required: [itemType, itemId, action]
+      properties:
+        itemType:
+          type: string
+          enum: [email_draft, meeting_contribution, decision, meeting_trigger]
+        itemId: { type: string }
+        action:
+          type: string
+          enum: [authorize, edit_authorize, reject]
+        editedContent: { type: ["string", "null"] }
+        rejectionReason: { type: ["string", "null"] }
+    AuthorizeItemResponse:
+      type: object
+      required: [success, message]
+      properties:
+        success: { type: boolean }
+        message: { type: string }
+        learnedKnowledgeUnit:
+          type: ["object", "null"]
+          $ref: "#/components/schemas/AtlasKnowledgeUnit"
+    KnowledgeUnitsResponse:
+      type: object
+      required: [knowledgeUnits]
+      properties:
+        knowledgeUnits:
+          type: array
+          items: { $ref: "#/components/schemas/AtlasKnowledgeUnit" }
+
 

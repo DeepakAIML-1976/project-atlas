@@ -638,6 +638,180 @@ export const GetAtlasActivityResponse = zod.array(GetAtlasActivityResponseItem)
 
 
 /**
+ * @summary List all pending authorization items across email drafts, meeting contributions, decisions, and trigger alerts
+ */
+export const getAuthorizationInboxResponsePendingDecisionsItemConfidenceMin = 0;
+export const getAuthorizationInboxResponsePendingDecisionsItemConfidenceMax = 1;
+
+
+
+export const GetAuthorizationInboxResponse = zod.object({
+  "pendingEmails": zod.array(zod.object({
+  "id": zod.string(),
+  "sender": zod.string(),
+  "subject": zod.string(),
+  "incomingBody": zod.string(),
+  "twinDraftResponse": zod.string(),
+  "reasoning": zod.string().nullish(),
+  "confidence": zod.number().nullish(),
+  "status": zod.string(),
+  "authorizedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+})),
+  "pendingMeetingContributions": zod.array(zod.object({
+  "id": zod.string(),
+  "meetingId": zod.string(),
+  "topic": zod.string(),
+  "twinProposedStatement": zod.string(),
+  "engineeringBasis": zod.string().nullish(),
+  "status": zod.string(),
+  "createdAt": zod.coerce.date()
+})),
+  "pendingDecisions": zod.array(zod.object({
+  "id": zod.string(),
+  "title": zod.string(),
+  "domain": zod.string(),
+  "context": zod.string(),
+  "recommendation": zod.string(),
+  "evidence": zod.array(zod.string()),
+  "confidence": zod.number().min(getAuthorizationInboxResponsePendingDecisionsItemConfidenceMin).max(getAuthorizationInboxResponsePendingDecisionsItemConfidenceMax).nullable(),
+  "status": zod.enum(['pending', 'approved', 'rejected', 'escalated']),
+  "reviewNote": zod.string().nullable(),
+  "createdAt": zod.coerce.date(),
+  "updatedAt": zod.coerce.date()
+})),
+  "pendingMeetingTriggers": zod.array(zod.object({
+  "id": zod.string(),
+  "liveMeetingId": zod.string(),
+  "speakerName": zod.string().nullish(),
+  "triggerPhrase": zod.string(),
+  "questionAsked": zod.string(),
+  "twinProposedResponse": zod.string(),
+  "outputMode": zod.string(),
+  "humanAlertStatus": zod.string(),
+  "createdAt": zod.coerce.date()
+})),
+  "totalPending": zod.number().int()
+})
+
+
+/**
+ * @summary Authorize, edit & authorize, or reject a pending digital twin action
+ */
+export const AuthorizeInboxItemBody = zod.object({
+  "itemType": zod.enum(['email_draft', 'meeting_contribution', 'decision', 'meeting_trigger']),
+  "itemId": zod.string(),
+  "action": zod.enum(['authorize', 'edit_authorize', 'reject']),
+  "editedContent": zod.string().nullish(),
+  "rejectionReason": zod.string().nullish()
+})
+
+export const AuthorizeInboxItemResponse = zod.object({
+  "success": zod.boolean(),
+  "message": zod.string(),
+  "learnedKnowledgeUnit": zod.object({
+  "id": zod.string(),
+  "domain": zod.string(),
+  "topic": zod.string(),
+  "problem": zod.string().nullish(),
+  "context": zod.string().nullish(),
+  "experience": zod.string().nullish(),
+  "reasoning": zod.string().nullish(),
+  "decision": zod.string().nullish(),
+  "outcome": zod.string().nullish(),
+  "lesson": zod.string().nullish(),
+  "heuristic": zod.string().nullish(),
+  "exception": zod.string().nullish(),
+  "sourceRecordId": zod.string().nullish(),
+  "confidence": zod.number(),
+  "validationStatus": zod.string(),
+  "createdAt": zod.coerce.date()
+}).nullish()
+})
+
+
+/**
+ * @summary Retrieve tacit knowledge units and heuristics learned by or taught to the digital twin
+ */
+export const GetKnowledgeUnitsQueryParams = zod.object({
+  "domain": zod.coerce.string().optional(),
+  "query": zod.coerce.string().optional()
+})
+
+export const GetKnowledgeUnitsResponse = zod.object({
+  "knowledgeUnits": zod.array(zod.object({
+  "id": zod.string(),
+  "domain": zod.string(),
+  "topic": zod.string(),
+  "problem": zod.string().nullish(),
+  "context": zod.string().nullish(),
+  "experience": zod.string().nullish(),
+  "reasoning": zod.string().nullish(),
+  "decision": zod.string().nullish(),
+  "outcome": zod.string().nullish(),
+  "lesson": zod.string().nullish(),
+  "heuristic": zod.string().nullish(),
+  "exception": zod.string().nullish(),
+  "sourceRecordId": zod.string().nullish(),
+  "confidence": zod.number(),
+  "validationStatus": zod.string(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Manually teach or add a tacit knowledge unit / heuristic to the twin
+ */
+
+
+
+
+export const CreateKnowledgeUnitBody = zod.object({
+  "domain": zod.string().min(1),
+  "topic": zod.string().min(1),
+  "problem": zod.string().nullish(),
+  "context": zod.string().nullish(),
+  "experience": zod.string().nullish(),
+  "reasoning": zod.string().nullish(),
+  "decision": zod.string().nullish(),
+  "outcome": zod.string().nullish(),
+  "lesson": zod.string().nullish(),
+  "heuristic": zod.string().nullish(),
+  "exception": zod.string().nullish()
+})
+
+export const CreateKnowledgeUnitResponse = zod.object({
+  "id": zod.string(),
+  "domain": zod.string(),
+  "topic": zod.string(),
+  "problem": zod.string().nullish(),
+  "context": zod.string().nullish(),
+  "experience": zod.string().nullish(),
+  "reasoning": zod.string().nullish(),
+  "decision": zod.string().nullish(),
+  "outcome": zod.string().nullish(),
+  "lesson": zod.string().nullish(),
+  "heuristic": zod.string().nullish(),
+  "exception": zod.string().nullish(),
+  "sourceRecordId": zod.string().nullish(),
+  "confidence": zod.number(),
+  "validationStatus": zod.string(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Delete a tacit knowledge unit
+ */
+export const DeleteKnowledgeUnitParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteKnowledgeUnitResponse = zod.void()
+
+
+/**
  * @summary Request a private presigned URL for a user-provided source
  */
 

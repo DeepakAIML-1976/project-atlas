@@ -10,6 +10,8 @@ import { ErrorState, Load, Shell } from '@/components/atlas-ui';
 import { Landing } from '@/pages/landing';
 import { Onboarding, Overview, Sources, Twin } from '@/pages/core';
 import { Activity, Decisions, Meetings, Memory } from '@/pages/records';
+import { AuthorizationInbox } from '@/pages/authorization-inbox';
+import { KnowledgeUnits } from '@/pages/knowledge-units';
 
 const queryClient = new QueryClient({defaultOptions:{queries:{retry:1,refetchOnWindowFocus:false}}});
 const clerkPubKey = publishableKeyFromHost(
@@ -70,6 +72,8 @@ function Routes(){return <Routed><Switch>
   <Route path="/sign-in/*?">{<AuthPage mode="in"/>}</Route>
   <Route path="/sign-up/*?">{<AuthPage mode="up"/>}</Route>
   <Route path="/overview">{<Protected><Overview/></Protected>}</Route>
+  <Route path="/authorization-inbox">{<Protected><AuthorizationInbox/></Protected>}</Route>
+  <Route path="/knowledge-units">{<Protected><KnowledgeUnits/></Protected>}</Route>
   <Route path="/twin">{<Protected><Twin/></Protected>}</Route>
   <Route path="/sources">{<Protected><Sources/></Protected>}</Route>
   <Route path="/meetings">{<Protected><Meetings/></Protected>}</Route>

@@ -5,6 +5,8 @@ import { useClerk } from '@clerk/react';
 
 const links = [
   { href:'/overview', label:'Overview', icon:LayoutDashboard },
+  { href:'/authorization-inbox', label:'Executive Inbox', icon:ShieldCheck },
+  { href:'/knowledge-units', label:'Knowledge & Heuristics', icon:BookOpenText },
   { href:'/twin', label:'My twin', icon:Fingerprint },
   { href:'/sources', label:'Sources', icon:FileStack },
   { href:'/meetings', label:'Meetings', icon:CalendarDays },

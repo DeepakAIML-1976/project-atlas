@@ -24,19 +24,26 @@ import type {
   ActionUpdate,
   ActivityEntry,
   AtlasDecision,
+  AtlasKnowledgeUnit,
   AtlasMeeting,
   AtlasOverview,
   AtlasSession,
   AtlasSource,
   AtlasSourceInput,
+  AuthorizationInboxResponse,
+  AuthorizeItemInput,
+  AuthorizeItemResponse,
   AutonomyInput,
   AutonomyPolicy,
   DecisionInput,
   DecisionReview,
+  GetKnowledgeUnitsParams,
   HealthStatus,
   KnowledgeGraph,
   KnowledgeLink,
   KnowledgeLinkInput,
+  KnowledgeUnitInput,
+  KnowledgeUnitsResponse,
   MeetingAction,
   MeetingInput,
   MemorySearchResult,
@@ -2054,6 +2061,417 @@ export function useGetAtlasActivity<TData = Awaited<ReturnType<typeof getAtlasAc
 
 
 
+
+export const getGetAuthorizationInboxUrl = () => {
+
+
+
+
+  return `/api/atlas/authorization-inbox`
+}
+
+/**
+ * @summary List all pending authorization items across email drafts, meeting contributions, decisions, and trigger alerts
+ */
+export const getAuthorizationInbox = async ( options?: Parameters<typeof customFetch>[1]): Promise<AuthorizationInboxResponse> => {
+
+  return customFetch<AuthorizationInboxResponse>(getGetAuthorizationInboxUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetAuthorizationInboxQueryKey = () => {
+    return [
+    `/api/atlas/authorization-inbox`
+    ] as const;
+    }
+
+
+export const getGetAuthorizationInboxQueryOptions = <TData = Awaited<ReturnType<typeof getAuthorizationInbox>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAuthorizationInbox>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetAuthorizationInboxQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getAuthorizationInbox>>> = ({ signal }) => getAuthorizationInbox({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getAuthorizationInbox>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetAuthorizationInboxQueryResult = NonNullable<Awaited<ReturnType<typeof getAuthorizationInbox>>>
+export type GetAuthorizationInboxQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List all pending authorization items across email drafts, meeting contributions, decisions, and trigger alerts
+ */
+
+export function useGetAuthorizationInbox<TData = Awaited<ReturnType<typeof getAuthorizationInbox>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getAuthorizationInbox>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetAuthorizationInboxQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getAuthorizeInboxItemUrl = () => {
+
+
+
+
+  return `/api/atlas/authorization-inbox/authorize`
+}
+
+/**
+ * @summary Authorize, edit & authorize, or reject a pending digital twin action
+ */
+export const authorizeInboxItem = async (authorizeItemInput: AuthorizeItemInput, options?: Parameters<typeof customFetch>[1]): Promise<AuthorizeItemResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<AuthorizeItemResponse>(getAuthorizeInboxItemUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(authorizeItemInput)
+  }
+);}
+
+
+
+
+
+export const getAuthorizeInboxItemMutationKey = () => ['authorizeInboxItem'] as const;
+
+export const getAuthorizeInboxItemMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authorizeInboxItem>>, TError,AuthorizeInboxItemMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof authorizeInboxItem>>, TError,AuthorizeInboxItemMutationVariables, TContext> => {
+
+const mutationKey = getAuthorizeInboxItemMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof authorizeInboxItem>>, AuthorizeInboxItemMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  authorizeInboxItem(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type AuthorizeInboxItemMutationResult = NonNullable<Awaited<ReturnType<typeof authorizeInboxItem>>>
+    export type AuthorizeInboxItemMutationBody = BodyType<AuthorizeItemInput>
+    export type AuthorizeInboxItemMutationError = ErrorType<unknown>
+    export type AuthorizeInboxItemMutationVariables = {data: BodyType<AuthorizeItemInput>}
+
+    /**
+ * @summary Authorize, edit & authorize, or reject a pending digital twin action
+ */
+export const useAuthorizeInboxItem = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof authorizeInboxItem>>, TError,AuthorizeInboxItemMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof authorizeInboxItem>>,
+        TError,
+        AuthorizeInboxItemMutationVariables,
+        TContext
+      > => {
+      return useMutation(getAuthorizeInboxItemMutationOptions(options));
+    }
+
+export const getGetKnowledgeUnitsUrl = (params?: GetKnowledgeUnitsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/atlas/knowledge-units?${stringifiedParams}` : `/api/atlas/knowledge-units`
+}
+
+/**
+ * @summary Retrieve tacit knowledge units and heuristics learned by or taught to the digital twin
+ */
+export const getKnowledgeUnits = async (params?: GetKnowledgeUnitsParams, options?: Parameters<typeof customFetch>[1]): Promise<KnowledgeUnitsResponse> => {
+
+  return customFetch<KnowledgeUnitsResponse>(getGetKnowledgeUnitsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetKnowledgeUnitsQueryKey = (params?: GetKnowledgeUnitsParams,) => {
+    return [
+    `/api/atlas/knowledge-units`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetKnowledgeUnitsQueryOptions = <TData = Awaited<ReturnType<typeof getKnowledgeUnits>>, TError = ErrorType<unknown>>(params?: GetKnowledgeUnitsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKnowledgeUnits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetKnowledgeUnitsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getKnowledgeUnits>>> = ({ signal }) => getKnowledgeUnits(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getKnowledgeUnits>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetKnowledgeUnitsQueryResult = NonNullable<Awaited<ReturnType<typeof getKnowledgeUnits>>>
+export type GetKnowledgeUnitsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Retrieve tacit knowledge units and heuristics learned by or taught to the digital twin
+ */
+
+export function useGetKnowledgeUnits<TData = Awaited<ReturnType<typeof getKnowledgeUnits>>, TError = ErrorType<unknown>>(
+ params?: GetKnowledgeUnitsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getKnowledgeUnits>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetKnowledgeUnitsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateKnowledgeUnitUrl = () => {
+
+
+
+
+  return `/api/atlas/knowledge-units`
+}
+
+/**
+ * @summary Manually teach or add a tacit knowledge unit / heuristic to the twin
+ */
+export const createKnowledgeUnit = async (knowledgeUnitInput: KnowledgeUnitInput, options?: Parameters<typeof customFetch>[1]): Promise<AtlasKnowledgeUnit> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<AtlasKnowledgeUnit>(getCreateKnowledgeUnitUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(knowledgeUnitInput)
+  }
+);}
+
+
+
+
+
+export const getCreateKnowledgeUnitMutationKey = () => ['createKnowledgeUnit'] as const;
+
+export const getCreateKnowledgeUnitMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createKnowledgeUnit>>, TError,CreateKnowledgeUnitMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createKnowledgeUnit>>, TError,CreateKnowledgeUnitMutationVariables, TContext> => {
+
+const mutationKey = getCreateKnowledgeUnitMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createKnowledgeUnit>>, CreateKnowledgeUnitMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createKnowledgeUnit(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateKnowledgeUnitMutationResult = NonNullable<Awaited<ReturnType<typeof createKnowledgeUnit>>>
+    export type CreateKnowledgeUnitMutationBody = BodyType<KnowledgeUnitInput>
+    export type CreateKnowledgeUnitMutationError = ErrorType<unknown>
+    export type CreateKnowledgeUnitMutationVariables = {data: BodyType<KnowledgeUnitInput>}
+
+    /**
+ * @summary Manually teach or add a tacit knowledge unit / heuristic to the twin
+ */
+export const useCreateKnowledgeUnit = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createKnowledgeUnit>>, TError,CreateKnowledgeUnitMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createKnowledgeUnit>>,
+        TError,
+        CreateKnowledgeUnitMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateKnowledgeUnitMutationOptions(options));
+    }
+
+export const getDeleteKnowledgeUnitUrl = (id: string,) => {
+
+
+
+
+  return `/api/atlas/knowledge-units/${id}`
+}
+
+/**
+ * @summary Delete a tacit knowledge unit
+ */
+export const deleteKnowledgeUnit = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteKnowledgeUnitUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteKnowledgeUnitMutationKey = () => ['deleteKnowledgeUnit'] as const;
+
+export const getDeleteKnowledgeUnitMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteKnowledgeUnit>>, TError,DeleteKnowledgeUnitMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteKnowledgeUnit>>, TError,DeleteKnowledgeUnitMutationVariables, TContext> => {
+
+const mutationKey = getDeleteKnowledgeUnitMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteKnowledgeUnit>>, DeleteKnowledgeUnitMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteKnowledgeUnit(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteKnowledgeUnitMutationResult = NonNullable<Awaited<ReturnType<typeof deleteKnowledgeUnit>>>
+
+    export type DeleteKnowledgeUnitMutationError = ErrorType<unknown>
+    export type DeleteKnowledgeUnitMutationVariables = {id: string}
+
+    /**
+ * @summary Delete a tacit knowledge unit
+ */
+export const useDeleteKnowledgeUnit = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteKnowledgeUnit>>, TError,DeleteKnowledgeUnitMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteKnowledgeUnit>>,
+        TError,
+        DeleteKnowledgeUnitMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteKnowledgeUnitMutationOptions(options));
+    }
 
 export const getRequestUploadUrlUrl = () => {
 
