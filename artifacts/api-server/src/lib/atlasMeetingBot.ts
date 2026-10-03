@@ -86,9 +86,12 @@ IMPORTANT: Prepend your statement with "Deepak's AI Representative (Atlas):" to 
     }
 
     if (!twinProposedResponse) {
-      // Smart SME fallback formulation
-      const topHeuristic = knowledgeUnits[0]?.heuristic || "Class 300/600 ASME B16.5 rating and NACE MR0175 material specs apply.";
-      twinProposedResponse = `Deepak's AI Representative (Atlas): Based on Deepak's established piping engineering heuristics for this domain: ${topHeuristic}`;
+      const topHeuristic = knowledgeUnits[0]?.heuristic;
+      if (topHeuristic) {
+        twinProposedResponse = `Deepak's AI Representative (Atlas): Based on Deepak's established engineering heuristics: ${topHeuristic}`;
+      } else {
+        twinProposedResponse = `Deepak's AI Representative (Atlas): Deepak has received your query. Routing to Deepak's Executive Authorization Inbox for sign-off.`;
+      }
     }
 
     // Record meeting trigger alert for Executive Authorization Inbox sign-off

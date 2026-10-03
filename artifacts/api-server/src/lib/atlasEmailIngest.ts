@@ -74,10 +74,16 @@ Return JSON in this format:
   }
 
   if (!twinDraftResponse) {
-    const matchedRule = knowledgeUnits[0]?.heuristic || "ASME B31.3 Class 300 / NACE MR0175 compliance required for wet sour gas service.";
-    twinDraftResponse = `Dear ${sender.split("<")[0].trim()},\n\nThank you for reaching out regarding "${subject}".\n\nBased on our engineering standards for this service: ${matchedRule}\n\nPlease let me know if you would like me to review the formal drawing package.\n\nBest regards,\nDeepak\nSenior Piping Engineering SME`;
-    reasoning = `Formulated based on established piping heuristic: ${matchedRule}`;
-    confidence = 0.80;
+    const matchedRule = knowledgeUnits[0]?.heuristic;
+    if (matchedRule) {
+      twinDraftResponse = `Dear ${sender.split("<")[0].trim()},\n\nThank you for reaching out regarding "${subject}".\n\nBased on established engineering standards for this service: ${matchedRule}\n\nPlease let me know if you would like me to review the formal drawing package.\n\nBest regards,\nDeepak\nSenior Piping Engineering SME`;
+      reasoning = `Formulated based on established piping heuristic: ${matchedRule}`;
+      confidence = 0.85;
+    } else {
+      twinDraftResponse = `Dear ${sender.split("<")[0].trim()},\n\nThank you for your email regarding "${subject}".\n\nI have received your technical inquiry and am reviewing the specific project parameters before confirming. I will get back to you shortly.\n\nBest regards,\nDeepak\nSenior Piping Engineering SME`;
+      reasoning = `No pre-existing knowledge unit found. Draft created for human SME authorization and knowledge capture.`;
+      confidence = 0.50;
+    }
   }
 
   // Check delegation rules for workspace
