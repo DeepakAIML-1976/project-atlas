@@ -812,6 +812,141 @@ export const DeleteKnowledgeUnitResponse = zod.void()
 
 
 /**
+ * @summary List all active and historical live meeting bot representative sessions
+ */
+export const GetLiveMeetingsResponse = zod.object({
+  "liveMeetings": zod.array(zod.object({
+  "id": zod.string(),
+  "meetingTitle": zod.string(),
+  "platform": zod.string(),
+  "meetingUrl": zod.string().nullish(),
+  "botStatus": zod.string(),
+  "botDisplayName": zod.string(),
+  "joinedAt": zod.coerce.date().nullish(),
+  "leftAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Deploy digital twin AI representative bot to a live meeting (Teams/Zoom)
+ */
+
+
+
+export const CreateLiveMeetingBody = zod.object({
+  "meetingTitle": zod.string().min(1),
+  "platform": zod.string().optional(),
+  "meetingUrl": zod.string().nullish(),
+  "botDisplayName": zod.string().optional()
+})
+
+export const CreateLiveMeetingResponse = zod.object({
+  "id": zod.string(),
+  "meetingTitle": zod.string(),
+  "platform": zod.string(),
+  "meetingUrl": zod.string().nullish(),
+  "botStatus": zod.string(),
+  "botDisplayName": zod.string(),
+  "joinedAt": zod.coerce.date().nullish(),
+  "leftAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Get details and trigger alerts for a live meeting session
+ */
+export const GetLiveMeetingDetailParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const GetLiveMeetingDetailResponse = zod.object({
+  "meeting": zod.object({
+  "id": zod.string(),
+  "meetingTitle": zod.string(),
+  "platform": zod.string(),
+  "meetingUrl": zod.string().nullish(),
+  "botStatus": zod.string(),
+  "botDisplayName": zod.string(),
+  "joinedAt": zod.coerce.date().nullish(),
+  "leftAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+}),
+  "triggers": zod.array(zod.object({
+  "id": zod.string(),
+  "liveMeetingId": zod.string(),
+  "speakerName": zod.string().nullish(),
+  "triggerPhrase": zod.string(),
+  "questionAsked": zod.string(),
+  "twinProposedResponse": zod.string(),
+  "outputMode": zod.string(),
+  "humanAlertStatus": zod.string(),
+  "createdAt": zod.coerce.date()
+})),
+  "notes": zod.string().nullish()
+})
+
+
+/**
+ * @summary Ingest a live transcript chunk from meeting audio/speech stream, scan for wake-up triggers & log notes
+ */
+export const IngestLiveTranscriptParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+
+
+
+export const IngestLiveTranscriptBody = zod.object({
+  "speakerName": zod.string(),
+  "text": zod.string().min(1)
+})
+
+export const IngestLiveTranscriptResponse = zod.object({
+  "processed": zod.boolean(),
+  "triggerDetected": zod.boolean(),
+  "triggeredAlert": zod.object({
+  "id": zod.string(),
+  "liveMeetingId": zod.string(),
+  "speakerName": zod.string().nullish(),
+  "triggerPhrase": zod.string(),
+  "questionAsked": zod.string(),
+  "twinProposedResponse": zod.string(),
+  "outputMode": zod.string(),
+  "humanAlertStatus": zod.string(),
+  "createdAt": zod.coerce.date()
+}).nullish(),
+  "extractedNote": zod.string().nullish()
+})
+
+
+/**
+ * @summary Update bot status for a live meeting session (e.g. leave meeting)
+ */
+export const UpdateLiveMeetingStatusParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const UpdateLiveMeetingStatusBody = zod.object({
+  "botStatus": zod.enum(['joining', 'in_call', 'left', 'errored'])
+})
+
+export const UpdateLiveMeetingStatusResponse = zod.object({
+  "id": zod.string(),
+  "meetingTitle": zod.string(),
+  "platform": zod.string(),
+  "meetingUrl": zod.string().nullish(),
+  "botStatus": zod.string(),
+  "botDisplayName": zod.string(),
+  "joinedAt": zod.coerce.date().nullish(),
+  "leftAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
  * @summary Request a private presigned URL for a user-provided source
  */
 

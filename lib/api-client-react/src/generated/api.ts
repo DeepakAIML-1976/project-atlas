@@ -25,6 +25,7 @@ import type {
   ActivityEntry,
   AtlasDecision,
   AtlasKnowledgeUnit,
+  AtlasLiveMeeting,
   AtlasMeeting,
   AtlasOverview,
   AtlasSession,
@@ -35,15 +36,20 @@ import type {
   AuthorizeItemResponse,
   AutonomyInput,
   AutonomyPolicy,
+  CreateLiveMeetingInput,
   DecisionInput,
   DecisionReview,
   GetKnowledgeUnitsParams,
   HealthStatus,
+  IngestTranscriptInput,
+  IngestTranscriptResponse,
   KnowledgeGraph,
   KnowledgeLink,
   KnowledgeLinkInput,
   KnowledgeUnitInput,
   KnowledgeUnitsResponse,
+  LiveMeetingDetailResponse,
+  LiveMeetingsResponse,
   MeetingAction,
   MeetingInput,
   MemorySearchResult,
@@ -53,6 +59,7 @@ import type {
   TwinField,
   TwinFieldInput,
   TwinProfile,
+  UpdateLiveMeetingStatusInput,
   UploadUrlRequest,
   UploadUrlResponse,
   WorkspaceInput
@@ -2471,6 +2478,426 @@ export const useDeleteKnowledgeUnit = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getDeleteKnowledgeUnitMutationOptions(options));
+    }
+
+export const getGetLiveMeetingsUrl = () => {
+
+
+
+
+  return `/api/atlas/live-meetings`
+}
+
+/**
+ * @summary List all active and historical live meeting bot representative sessions
+ */
+export const getLiveMeetings = async ( options?: Parameters<typeof customFetch>[1]): Promise<LiveMeetingsResponse> => {
+
+  return customFetch<LiveMeetingsResponse>(getGetLiveMeetingsUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetLiveMeetingsQueryKey = () => {
+    return [
+    `/api/atlas/live-meetings`
+    ] as const;
+    }
+
+
+export const getGetLiveMeetingsQueryOptions = <TData = Awaited<ReturnType<typeof getLiveMeetings>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLiveMeetings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetLiveMeetingsQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLiveMeetings>>> = ({ signal }) => getLiveMeetings({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getLiveMeetings>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetLiveMeetingsQueryResult = NonNullable<Awaited<ReturnType<typeof getLiveMeetings>>>
+export type GetLiveMeetingsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List all active and historical live meeting bot representative sessions
+ */
+
+export function useGetLiveMeetings<TData = Awaited<ReturnType<typeof getLiveMeetings>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLiveMeetings>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetLiveMeetingsQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateLiveMeetingUrl = () => {
+
+
+
+
+  return `/api/atlas/live-meetings`
+}
+
+/**
+ * @summary Deploy digital twin AI representative bot to a live meeting (Teams/Zoom)
+ */
+export const createLiveMeeting = async (createLiveMeetingInput: CreateLiveMeetingInput, options?: Parameters<typeof customFetch>[1]): Promise<AtlasLiveMeeting> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<AtlasLiveMeeting>(getCreateLiveMeetingUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(createLiveMeetingInput)
+  }
+);}
+
+
+
+
+
+export const getCreateLiveMeetingMutationKey = () => ['createLiveMeeting'] as const;
+
+export const getCreateLiveMeetingMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createLiveMeeting>>, TError,CreateLiveMeetingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createLiveMeeting>>, TError,CreateLiveMeetingMutationVariables, TContext> => {
+
+const mutationKey = getCreateLiveMeetingMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createLiveMeeting>>, CreateLiveMeetingMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createLiveMeeting(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateLiveMeetingMutationResult = NonNullable<Awaited<ReturnType<typeof createLiveMeeting>>>
+    export type CreateLiveMeetingMutationBody = BodyType<CreateLiveMeetingInput>
+    export type CreateLiveMeetingMutationError = ErrorType<unknown>
+    export type CreateLiveMeetingMutationVariables = {data: BodyType<CreateLiveMeetingInput>}
+
+    /**
+ * @summary Deploy digital twin AI representative bot to a live meeting (Teams/Zoom)
+ */
+export const useCreateLiveMeeting = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createLiveMeeting>>, TError,CreateLiveMeetingMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createLiveMeeting>>,
+        TError,
+        CreateLiveMeetingMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateLiveMeetingMutationOptions(options));
+    }
+
+export const getGetLiveMeetingDetailUrl = (id: string,) => {
+
+
+
+
+  return `/api/atlas/live-meetings/${id}`
+}
+
+/**
+ * @summary Get details and trigger alerts for a live meeting session
+ */
+export const getLiveMeetingDetail = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<LiveMeetingDetailResponse> => {
+
+  return customFetch<LiveMeetingDetailResponse>(getGetLiveMeetingDetailUrl(id),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetLiveMeetingDetailQueryKey = (id: string,) => {
+    return [
+    `/api/atlas/live-meetings/${id}`
+    ] as const;
+    }
+
+
+export const getGetLiveMeetingDetailQueryOptions = <TData = Awaited<ReturnType<typeof getLiveMeetingDetail>>, TError = ErrorType<unknown>>(id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLiveMeetingDetail>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetLiveMeetingDetailQueryKey(id);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getLiveMeetingDetail>>> = ({ signal }) => getLiveMeetingDetail(id, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getLiveMeetingDetail>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetLiveMeetingDetailQueryResult = NonNullable<Awaited<ReturnType<typeof getLiveMeetingDetail>>>
+export type GetLiveMeetingDetailQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary Get details and trigger alerts for a live meeting session
+ */
+
+export function useGetLiveMeetingDetail<TData = Awaited<ReturnType<typeof getLiveMeetingDetail>>, TError = ErrorType<unknown>>(
+ id: string, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getLiveMeetingDetail>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetLiveMeetingDetailQueryOptions(id,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getIngestLiveTranscriptUrl = (id: string,) => {
+
+
+
+
+  return `/api/atlas/live-meetings/${id}/transcript`
+}
+
+/**
+ * @summary Ingest a live transcript chunk from meeting audio/speech stream, scan for wake-up triggers & log notes
+ */
+export const ingestLiveTranscript = async (id: string,
+    ingestTranscriptInput: IngestTranscriptInput, options?: Parameters<typeof customFetch>[1]): Promise<IngestTranscriptResponse> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<IngestTranscriptResponse>(getIngestLiveTranscriptUrl(id),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(ingestTranscriptInput)
+  }
+);}
+
+
+
+
+
+export const getIngestLiveTranscriptMutationKey = () => ['ingestLiveTranscript'] as const;
+
+export const getIngestLiveTranscriptMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestLiveTranscript>>, TError,IngestLiveTranscriptMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof ingestLiveTranscript>>, TError,IngestLiveTranscriptMutationVariables, TContext> => {
+
+const mutationKey = getIngestLiveTranscriptMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof ingestLiveTranscript>>, IngestLiveTranscriptMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  ingestLiveTranscript(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type IngestLiveTranscriptMutationResult = NonNullable<Awaited<ReturnType<typeof ingestLiveTranscript>>>
+    export type IngestLiveTranscriptMutationBody = BodyType<IngestTranscriptInput>
+    export type IngestLiveTranscriptMutationError = ErrorType<unknown>
+    export type IngestLiveTranscriptMutationVariables = {id: string;data: BodyType<IngestTranscriptInput>}
+
+    /**
+ * @summary Ingest a live transcript chunk from meeting audio/speech stream, scan for wake-up triggers & log notes
+ */
+export const useIngestLiveTranscript = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestLiveTranscript>>, TError,IngestLiveTranscriptMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof ingestLiveTranscript>>,
+        TError,
+        IngestLiveTranscriptMutationVariables,
+        TContext
+      > => {
+      return useMutation(getIngestLiveTranscriptMutationOptions(options));
+    }
+
+export const getUpdateLiveMeetingStatusUrl = (id: string,) => {
+
+
+
+
+  return `/api/atlas/live-meetings/${id}/status`
+}
+
+/**
+ * @summary Update bot status for a live meeting session (e.g. leave meeting)
+ */
+export const updateLiveMeetingStatus = async (id: string,
+    updateLiveMeetingStatusInput: UpdateLiveMeetingStatusInput, options?: Parameters<typeof customFetch>[1]): Promise<AtlasLiveMeeting> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<AtlasLiveMeeting>(getUpdateLiveMeetingStatusUrl(id),
+  {
+    ...options,
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(updateLiveMeetingStatusInput)
+  }
+);}
+
+
+
+
+
+export const getUpdateLiveMeetingStatusMutationKey = () => ['updateLiveMeetingStatus'] as const;
+
+export const getUpdateLiveMeetingStatusMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLiveMeetingStatus>>, TError,UpdateLiveMeetingStatusMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof updateLiveMeetingStatus>>, TError,UpdateLiveMeetingStatusMutationVariables, TContext> => {
+
+const mutationKey = getUpdateLiveMeetingStatusMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof updateLiveMeetingStatus>>, UpdateLiveMeetingStatusMutationVariables> = (props) => {
+          const {id,data} = props ?? {};
+
+          return  updateLiveMeetingStatus(id,data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type UpdateLiveMeetingStatusMutationResult = NonNullable<Awaited<ReturnType<typeof updateLiveMeetingStatus>>>
+    export type UpdateLiveMeetingStatusMutationBody = BodyType<UpdateLiveMeetingStatusInput>
+    export type UpdateLiveMeetingStatusMutationError = ErrorType<unknown>
+    export type UpdateLiveMeetingStatusMutationVariables = {id: string;data: BodyType<UpdateLiveMeetingStatusInput>}
+
+    /**
+ * @summary Update bot status for a live meeting session (e.g. leave meeting)
+ */
+export const useUpdateLiveMeetingStatus = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateLiveMeetingStatus>>, TError,UpdateLiveMeetingStatusMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof updateLiveMeetingStatus>>,
+        TError,
+        UpdateLiveMeetingStatusMutationVariables,
+        TContext
+      > => {
+      return useMutation(getUpdateLiveMeetingStatusMutationOptions(options));
     }
 
 export const getRequestUploadUrlUrl = () => {

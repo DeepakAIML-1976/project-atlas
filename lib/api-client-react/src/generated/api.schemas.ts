@@ -633,6 +633,70 @@ export interface KnowledgeUnitsResponse {
   knowledgeUnits: AtlasKnowledgeUnit[];
 }
 
+export interface AtlasLiveMeeting {
+  id: string;
+  meetingTitle: string;
+  platform: string;
+  /** @nullable */
+  meetingUrl?: string | null;
+  botStatus: string;
+  botDisplayName: string;
+  /** @nullable */
+  joinedAt?: string | null;
+  /** @nullable */
+  leftAt?: string | null;
+  createdAt: string;
+}
+
+export interface LiveMeetingsResponse {
+  liveMeetings: AtlasLiveMeeting[];
+}
+
+export interface CreateLiveMeetingInput {
+  /** @minLength 1 */
+  meetingTitle: string;
+  platform?: string;
+  /** @nullable */
+  meetingUrl?: string | null;
+  botDisplayName?: string;
+}
+
+export interface LiveMeetingDetailResponse {
+  meeting: AtlasLiveMeeting;
+  triggers: AtlasMeetingTrigger[];
+  /** @nullable */
+  notes?: string | null;
+}
+
+export interface IngestTranscriptInput {
+  speakerName: string;
+  /** @minLength 1 */
+  text: string;
+}
+
+export interface IngestTranscriptResponse {
+  processed: boolean;
+  triggerDetected: boolean;
+  /** @nullable */
+  triggeredAlert?: AtlasMeetingTrigger | null;
+  /** @nullable */
+  extractedNote?: string | null;
+}
+
+export type UpdateLiveMeetingStatusInputBotStatus = typeof UpdateLiveMeetingStatusInputBotStatus[keyof typeof UpdateLiveMeetingStatusInputBotStatus];
+
+
+export const UpdateLiveMeetingStatusInputBotStatus = {
+  joining: 'joining',
+  in_call: 'in_call',
+  left: 'left',
+  errored: 'errored',
+} as const;
+
+export interface UpdateLiveMeetingStatusInput {
+  botStatus: UpdateLiveMeetingStatusInputBotStatus;
+}
+
 export type SearchAtlasMemoryParams = {
 /**
  * @minLength 1

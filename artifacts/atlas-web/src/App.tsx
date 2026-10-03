@@ -12,6 +12,7 @@ import { Onboarding, Overview, Sources, Twin } from '@/pages/core';
 import { Activity, Decisions, Meetings, Memory } from '@/pages/records';
 import { AuthorizationInbox } from '@/pages/authorization-inbox';
 import { KnowledgeUnits } from '@/pages/knowledge-units';
+import { LiveMeetings } from '@/pages/live-meetings';
 
 const queryClient = new QueryClient({defaultOptions:{queries:{retry:1,refetchOnWindowFocus:false}}});
 const clerkPubKey = publishableKeyFromHost(
@@ -73,6 +74,7 @@ function Routes(){return <Routed><Switch>
   <Route path="/sign-up/*?">{<AuthPage mode="up"/>}</Route>
   <Route path="/overview">{<Protected><Overview/></Protected>}</Route>
   <Route path="/authorization-inbox">{<Protected><AuthorizationInbox/></Protected>}</Route>
+  <Route path="/live-meetings">{<Protected><LiveMeetings/></Protected>}</Route>
   <Route path="/knowledge-units">{<Protected><KnowledgeUnits/></Protected>}</Route>
   <Route path="/twin">{<Protected><Twin/></Protected>}</Route>
   <Route path="/sources">{<Protected><Sources/></Protected>}</Route>

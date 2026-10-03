@@ -47,6 +47,12 @@ import {
   GetKnowledgeUnitsQueryParams,
   GetKnowledgeUnitsResponse,
   CreateKnowledgeUnitBody,
+  GetLiveMeetingsResponse,
+  CreateLiveMeetingBody,
+  GetLiveMeetingDetailResponse,
+  IngestLiveTranscriptBody,
+  IngestLiveTranscriptResponse,
+  UpdateLiveMeetingStatusBody,
 } from "@workspace/api-zod";
 import {
   atlasActionsTable,
@@ -64,6 +70,7 @@ import {
   atlasMeetingContributionsTable,
   atlasMeetingTriggersTable,
   atlasKnowledgeUnitsTable,
+  atlasLiveMeetingsTable,
   db,
 } from "@workspace/db";
 import {
@@ -76,6 +83,7 @@ import {
   workspaceContext,
 } from "../lib/atlas";
 import { extractCorrectionKnowledgeUnit } from "../lib/atlasAI";
+import { processLiveTranscriptChunk } from "../lib/atlasMeetingBot";
 
 const router: IRouter = Router();
 const recordTypes = ["source", "meeting", "decision"] as const;
@@ -1427,6 +1435,153 @@ router.delete("/atlas/knowledge-units/:id", async (req, res): Promise<void> => {
 
   await activity(context.workspaceId, context.userId, "deleted", "knowledge_unit", id);
   res.status(204).send();
+});
+
+router.get("/atlas/live-meetings", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+
+  const liveMeetings = await db
+    .select()
+    .from(atlasLiveMeetingsTable)
+    .where(eq(atlasLiveMeetingsTable.workspaceId, context.workspaceId))
+    .orderBy(desc(atlasLiveMeetingsTable.createdAt));
+
+  res.json(GetLiveMeetingsResponse.parse({ liveMeetings }));
+});
+
+router.post("/atlas/live-meetings", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const parsed = CreateLiveMeetingBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const [created] = await db
+    .insert(atlasLiveMeetingsTable)
+    .values({
+      workspaceId: context.workspaceId,
+      meetingTitle: parsed.data.meetingTitle,
+      platform: parsed.data.platform || "teams",
+      meetingUrl: parsed.data.meetingUrl || null,
+      botStatus: "in_call",
+      botDisplayName: parsed.data.botDisplayName || "Deepak's AI Representative (Atlas)",
+      joinedAt: new Date(),
+    })
+    .returning();
+
+  await activity(context.workspaceId, context.userId, "created", "live_meeting", created.id);
+
+  res.status(201).json(created);
+});
+
+router.get("/atlas/live-meetings/:id", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+
+  const { id } = req.params;
+  const [meeting] = await db
+    .select()
+    .from(atlasLiveMeetingsTable)
+    .where(
+      and(
+        eq(atlasLiveMeetingsTable.id, id),
+        eq(atlasLiveMeetingsTable.workspaceId, context.workspaceId),
+      ),
+    );
+
+  if (!meeting) {
+    res.status(404).json({ error: "Live meeting session not found" });
+    return;
+  }
+
+  const triggers = await db
+    .select()
+    .from(atlasMeetingTriggersTable)
+    .where(
+      and(
+        eq(atlasMeetingTriggersTable.liveMeetingId, id),
+        eq(atlasMeetingTriggersTable.workspaceId, context.workspaceId),
+      ),
+    )
+    .orderBy(desc(atlasMeetingTriggersTable.createdAt));
+
+  res.json(
+    GetLiveMeetingDetailResponse.parse({
+      meeting,
+      triggers,
+      notes: "Automatic transcript & action item logging active.",
+    }),
+  );
+});
+
+router.post("/atlas/live-meetings/:id/transcript", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const { id } = req.params;
+  const parsed = IngestLiveTranscriptBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const result = await processLiveTranscriptChunk(
+    context.workspaceId,
+    id,
+    parsed.data.speakerName,
+    parsed.data.text,
+  );
+
+  res.json(
+    IngestLiveTranscriptResponse.parse({
+      processed: result.processed,
+      triggerDetected: result.triggerDetected,
+      triggeredAlert: result.triggeredAlert ?? null,
+      extractedNote: result.extractedNote ?? null,
+    }),
+  );
+});
+
+router.patch("/atlas/live-meetings/:id/status", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const { id } = req.params;
+  const parsed = UpdateLiveMeetingStatusBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const [updated] = await db
+    .update(atlasLiveMeetingsTable)
+    .set({
+      botStatus: parsed.data.botStatus,
+      leftAt: parsed.data.botStatus === "left" ? new Date() : null,
+    })
+    .where(
+      and(
+        eq(atlasLiveMeetingsTable.id, id),
+        eq(atlasLiveMeetingsTable.workspaceId, context.workspaceId),
+      ),
+    )
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Live meeting session not found" });
+    return;
+  }
+
+  await activity(context.workspaceId, context.userId, "updated_status", "live_meeting", id);
+
+  res.json(updated);
 });
 
 export default router;

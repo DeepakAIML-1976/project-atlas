@@ -1,11 +1,12 @@
 import type { ReactNode } from 'react';
 import { Link, useLocation } from 'wouter';
-import { Activity, ArrowUpRight, BookOpenText, Boxes, CalendarDays, ChevronRight, Compass, FileStack, Fingerprint, GitBranch, LayoutDashboard, LogOut, Scale, ShieldCheck, X } from 'lucide-react';
+import { Activity, ArrowUpRight, BookOpenText, Boxes, CalendarDays, ChevronRight, Compass, FileStack, Fingerprint, GitBranch, LayoutDashboard, LogOut, Scale, ShieldCheck, Video, X } from 'lucide-react';
 import { useClerk } from '@clerk/react';
 
 const links = [
   { href:'/overview', label:'Overview', icon:LayoutDashboard },
   { href:'/authorization-inbox', label:'Executive Inbox', icon:ShieldCheck },
+  { href:'/live-meetings', label:'Live Bot', icon:Video },
   { href:'/knowledge-units', label:'Knowledge & Heuristics', icon:BookOpenText },
   { href:'/twin', label:'My twin', icon:Fingerprint },
   { href:'/sources', label:'Sources', icon:FileStack },

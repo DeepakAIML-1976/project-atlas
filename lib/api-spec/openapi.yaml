@@ -506,6 +506,101 @@ paths:
       responses:
         "204":
           description: Knowledge unit deleted
+  /atlas/live-meetings:
+    get:
+      operationId: getLiveMeetings
+      tags: [Atlas]
+      summary: List all active and historical live meeting bot representative sessions
+      responses:
+        "200":
+          description: List of live meeting sessions
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveMeetingsResponse"
+    post:
+      operationId: createLiveMeeting
+      tags: [Atlas]
+      summary: Deploy digital twin AI representative bot to a live meeting (Teams/Zoom)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateLiveMeetingInput"
+      responses:
+        "201":
+          description: Live meeting bot deployed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasLiveMeeting"
+  /atlas/live-meetings/{id}:
+    get:
+      operationId: getLiveMeetingDetail
+      tags: [Atlas]
+      summary: Get details and trigger alerts for a live meeting session
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Live meeting session detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveMeetingDetailResponse"
+  /atlas/live-meetings/{id}/transcript:
+    post:
+      operationId: ingestLiveTranscript
+      tags: [Atlas]
+      summary: Ingest a live transcript chunk from meeting audio/speech stream, scan for wake-up triggers & log notes
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestTranscriptInput"
+      responses:
+        "200":
+          description: Transcript processed with trigger and note extraction results
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestTranscriptResponse"
+  /atlas/live-meetings/{id}/status:
+    patch:
+      operationId: updateLiveMeetingStatus
+      tags: [Atlas]
+      summary: Update bot status for a live meeting session (e.g. leave meeting)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateLiveMeetingStatusInput"
+      responses:
+        "200":
+          description: Updated meeting bot session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasLiveMeeting"
   /storage/uploads/request-url:
     post:
       operationId: requestUploadUrl
@@ -1057,5 +1152,66 @@ components:
         knowledgeUnits:
           type: array
           items: { $ref: "#/components/schemas/AtlasKnowledgeUnit" }
+    AtlasLiveMeeting:
+      type: object
+      required: [id, meetingTitle, platform, botStatus, botDisplayName, createdAt]
+      properties:
+        id: { type: string }
+        meetingTitle: { type: string }
+        platform: { type: string }
+        meetingUrl: { type: ["string", "null"] }
+        botStatus: { type: string }
+        botDisplayName: { type: string }
+        joinedAt: { type: ["string", "null"], format: date-time }
+        leftAt: { type: ["string", "null"], format: date-time }
+        createdAt: { type: string, format: date-time }
+    LiveMeetingsResponse:
+      type: object
+      required: [liveMeetings]
+      properties:
+        liveMeetings:
+          type: array
+          items: { $ref: "#/components/schemas/AtlasLiveMeeting" }
+    CreateLiveMeetingInput:
+      type: object
+      required: [meetingTitle]
+      properties:
+        meetingTitle: { type: string, minLength: 1 }
+        platform: { type: string }
+        meetingUrl: { type: ["string", "null"] }
+        botDisplayName: { type: string }
+    LiveMeetingDetailResponse:
+      type: object
+      required: [meeting, triggers]
+      properties:
+        meeting: { $ref: "#/components/schemas/AtlasLiveMeeting" }
+        triggers:
+          type: array
+          items: { $ref: "#/components/schemas/AtlasMeetingTrigger" }
+        notes: { type: ["string", "null"] }
+    IngestTranscriptInput:
+      type: object
+      required: [speakerName, text]
+      properties:
+        speakerName: { type: string }
+        text: { type: string, minLength: 1 }
+    IngestTranscriptResponse:
+      type: object
+      required: [processed, triggerDetected]
+      properties:
+        processed: { type: boolean }
+        triggerDetected: { type: boolean }
+        triggeredAlert:
+          type: ["object", "null"]
+          $ref: "#/components/schemas/AtlasMeetingTrigger"
+        extractedNote: { type: ["string", "null"] }
+    UpdateLiveMeetingStatusInput:
+      type: object
+      required: [botStatus]
+      properties:
+        botStatus:
+          type: string
+          enum: [joining, in_call, left, errored]
+
 
 
