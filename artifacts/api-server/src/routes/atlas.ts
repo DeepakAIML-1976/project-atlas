@@ -58,6 +58,7 @@ import {
   IngestEmailBody,
   GetDelegationRulesResponse,
   CreateDelegationRuleBody,
+  SeedTop100KnowledgeUnitsResponse,
 } from "@workspace/api-zod";
 import {
   atlasActionsTable,
@@ -91,6 +92,7 @@ import {
 import { extractCorrectionKnowledgeUnit } from "../lib/atlasAI";
 import { processLiveTranscriptChunk } from "../lib/atlasMeetingBot";
 import { processIncomingEmail } from "../lib/atlasEmailIngest";
+import { TOP_100_HEURISTICS } from "../lib/top100HeuristicsData";
 
 const router: IRouter = Router();
 const recordTypes = ["source", "meeting", "decision"] as const;
@@ -1442,6 +1444,105 @@ router.delete("/atlas/knowledge-units/:id", async (req, res): Promise<void> => {
 
   await activity(context.workspaceId, context.userId, "deleted", "knowledge_unit", id);
   res.status(204).send();
+});
+
+router.post("/atlas/knowledge-units/seed-top100", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  // 1. Ensure master source document exists in atlasSourcesTable
+  const existingSources = await db
+    .select()
+    .from(atlasSourcesTable)
+    .where(
+      and(
+        eq(atlasSourcesTable.workspaceId, context.workspaceId),
+        eq(atlasSourcesTable.title, "TOP 100 TACIT PIPING ENGINEERING HEURISTICS & GOLDEN RULES - Version 1.0"),
+      ),
+    );
+
+  let sourceId: string;
+  if (existingSources.length > 0) {
+    sourceId = existingSources[0].id;
+  } else {
+    const [newSource] = await db
+      .insert(atlasSourcesTable)
+      .values({
+        workspaceId: context.workspaceId,
+        creatorId: context.userId,
+        title: "TOP 100 TACIT PIPING ENGINEERING HEURISTICS & GOLDEN RULES - Version 1.0",
+        kind: "document",
+        content: "Deepak's authoritative collection of 100 tacit piping engineering heuristics, golden rules, AI verification checks, and failure avoidance criteria across 15 engineering domains.",
+        permissionConfirmed: true,
+        profileAnalysisConsent: true,
+      })
+      .returning();
+    sourceId = newSource.id;
+    await activity(context.workspaceId, context.userId, "created", "source", sourceId);
+  }
+
+  // 2. Filter out heuristics already seeded in this workspace
+  const existingUnits = await db
+    .select()
+    .from(atlasKnowledgeUnitsTable)
+    .where(eq(atlasKnowledgeUnitsTable.workspaceId, context.workspaceId));
+
+  const existingTopics = new Set(existingUnits.map((u) => u.topic.toLowerCase()));
+
+  const toInsert = TOP_100_HEURISTICS.filter(
+    (h) =>
+      !existingTopics.has(`rule #${h.ruleNumber}: ${h.title}`.toLowerCase()) &&
+      !existingTopics.has(h.title.toLowerCase()),
+  );
+
+  if (toInsert.length === 0) {
+    res.json(
+      SeedTop100KnowledgeUnitsResponse.parse({
+        seededCount: 0,
+        sourceId,
+        message: "All 100 Tacit Piping Engineering Heuristics & Golden Rules are already seeded in this workspace.",
+      }),
+    );
+    return;
+  }
+
+  const insertValues = toInsert.map((h) => ({
+    workspaceId: context.workspaceId,
+    domain: h.domain,
+    topic: `Rule #${h.ruleNumber}: ${h.title}`,
+    problem: h.section,
+    context: h.goldenRule,
+    experience: "Authoritative SME Document: Top 100 Tacit Piping Engineering Heuristics v1.0",
+    reasoning: h.aiCheck ? `${h.heuristic}\n\n[AI Verification Check]: ${h.aiCheck}` : h.heuristic,
+    decision: h.goldenRule,
+    outcome: h.failureAvoided,
+    lesson: `Failure Avoided: ${h.failureAvoided}`,
+    heuristic: h.heuristic,
+    exception: null,
+    sourceRecordId: sourceId,
+    confidence: 1.0,
+    validationStatus: "validated",
+  }));
+
+  // Insert in batches of 25 to prevent memory/query size issues
+  let totalSeeded = 0;
+  const batchSize = 25;
+  for (let i = 0; i < insertValues.length; i += batchSize) {
+    const batch = insertValues.slice(i, i + batchSize);
+    await db.insert(atlasKnowledgeUnitsTable).values(batch);
+    totalSeeded += batch.length;
+  }
+
+  await activity(context.workspaceId, context.userId, "seeded", "knowledge_units", sourceId);
+
+  res.json(
+    SeedTop100KnowledgeUnitsResponse.parse({
+      seededCount: totalSeeded,
+      sourceId,
+      message: `Successfully seeded ${totalSeeded} Tacit Piping Engineering Heuristics & Golden Rules into workspace.`,
+    }),
+  );
 });
 
 router.get("/atlas/live-meetings", async (req, res): Promise<void> => {

@@ -810,6 +810,12 @@ export const DeleteKnowledgeUnitParams = zod.object({
 
 export const DeleteKnowledgeUnitResponse = zod.void()
 
+export const SeedTop100KnowledgeUnitsResponse = zod.object({
+  seededCount: zod.number(),
+  sourceId: zod.string(),
+  message: zod.string()
+})
+
 
 /**
  * @summary List all active and historical live meeting bot representative sessions

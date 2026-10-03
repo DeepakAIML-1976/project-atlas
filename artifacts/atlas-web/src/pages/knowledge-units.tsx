@@ -30,6 +30,7 @@ export function KnowledgeUnits() {
   const [selectedDomain, setSelectedDomain] = useState<string>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [isAdding, setIsAdding] = useState(false);
+  const [seedMessage, setSeedMessage] = useState<string | null>(null);
 
   // Form state for manual teach
   const [domain, setDomain] = useState('Piping Engineering');
@@ -49,6 +50,21 @@ export function KnowledgeUnits() {
       const res = await fetch(`/api/atlas/knowledge-units?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch knowledge units');
       return res.json();
+    },
+  });
+
+  const seedMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/atlas/knowledge-units/seed-top100', {
+        method: 'POST',
+      });
+      if (!res.ok) throw new Error('Failed to seed Top 100 Heuristics');
+      return res.json();
+    },
+    onSuccess: (data: { seededCount: number; message: string }) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/knowledge-units'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/sources'] });
+      setSeedMessage(data.message);
     },
   });
 
@@ -112,11 +128,32 @@ export function KnowledgeUnits() {
         italic="how you think."
         description="The repository of 35-year Piping Engineering SME experience, heuristics, and reasoning patterns. Learns automatically from your executive inbox corrections or explicit direct instruction."
         action={
-          <button className="btn btn-primary" onClick={() => setIsAdding(true)}>
-            <Plus size={15} /> Teach Twin Heuristic
-          </button>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-outline"
+              disabled={seedMutation.isPending}
+              onClick={() => seedMutation.mutate()}
+              title="Bulk-import Deepak's 100 Tacit Piping Engineering Heuristics & Golden Rules"
+            >
+              <Sparkles size={15} color="#c65131" />
+              {seedMutation.isPending ? 'Seeding Top 100 Rules…' : 'Seed 100 SME Golden Rules'}
+            </button>
+            <button className="btn btn-primary" onClick={() => setIsAdding(true)}>
+              <Plus size={15} /> Teach Twin Heuristic
+            </button>
+          </div>
         }
       />
+
+      {seedMessage && (
+        <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#065f46', padding: '12px 16px', borderRadius: 8, marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <CheckCircle2 size={18} color="#059669" />
+            <span style={{ fontSize: 13, fontWeight: 500 }}>{seedMessage}</span>
+          </div>
+          <button className="btn btn-quiet" style={{ padding: '2px 8px', fontSize: 12 }} onClick={() => setSeedMessage(null)}>Dismiss</button>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 16, marginBottom: 24, alignItems: 'center', flexWrap: 'wrap' }}>
         <div style={{ position: 'relative', flex: 1, minWidth: 260 }}>
