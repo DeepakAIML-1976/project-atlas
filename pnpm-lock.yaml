@@ -90,7 +90,6 @@ overrides:
   esbuild>@esbuild/sunos-x64: '-'
   esbuild>@esbuild/win32-arm64: '-'
   esbuild>@esbuild/win32-ia32: '-'
-  esbuild>@esbuild/win32-x64: '-'
   esbuild>@esbuild/aix-ppc64: '-'
   esbuild>@esbuild/android-arm: '-'
   esbuild>@esbuild/android-arm64: '-'
@@ -105,7 +104,6 @@ overrides:
   lightningcss>lightningcss-linux-arm64-musl: '-'
   lightningcss>lightningcss-linux-x64-musl: '-'
   lightningcss>lightningcss-win32-arm64-msvc: '-'
-  lightningcss>lightningcss-win32-x64-msvc: '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-android-arm64': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-darwin-arm64': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-darwin-x64': '-'
@@ -114,7 +112,6 @@ overrides:
   '@tailwindcss/oxide>@tailwindcss/oxide-linux-arm64-gnu': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-linux-arm64-musl': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-win32-arm64-msvc': '-'
-  '@tailwindcss/oxide>@tailwindcss/oxide-win32-x64-msvc': '-'
   '@tailwindcss/oxide>@tailwindcss/oxide-linux-x64-musl': '-'
   rollup>@rollup/rollup-android-arm-eabi: '-'
   rollup>@rollup/rollup-android-arm64: '-'
@@ -139,7 +136,6 @@ overrides:
   rollup>@rollup/rollup-win32-arm64-msvc: '-'
   rollup>@rollup/rollup-win32-ia32-msvc: '-'
   rollup>@rollup/rollup-win32-x64-gnu: '-'
-  rollup>@rollup/rollup-win32-x64-msvc: '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-arm64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-darwin-x64': '-'
   '@expo/ngrok-bin>@expo/ngrok-bin-freebsd-ia32': '-'
@@ -1325,6 +1321,12 @@ packages:
     cpu: [x64]
     os: [linux]
 
+  '@esbuild/win32-x64@0.28.2':
+    resolution: {integrity: sha512-5ebpxr3nWMzrL/rnUI755Jkuee0bHL/Gq0WTF9lvcpv73wAp5eu8MfBUgWK9bhWvZjj7yX8etf/8tI8Ney695g==}
+    engines: {node: '>=18'}
+    cpu: [x64]
+    os: [win32]
+
   '@expo-google-fonts/dm-sans@0.4.2':
     resolution: {integrity: sha512-e/fLH5aCJzkEenz7axvEn8N7IJAKhUwNjIxS75h9j+Ip1M9S7d22M19gJN3A7QW4egVkBJRyQh1hQFhngQn9yA==}
 
@@ -2415,6 +2417,11 @@ packages:
     os: [linux]
     libc: [glibc]
 
+  '@rollup/rollup-win32-x64-msvc@4.63.1':
+    resolution: {integrity: sha512-at8QVep6S3h5Y6gSbdGU06bRY5WJkf6WUduM9YtvYMbYhB1MOFfUgc6kehitQXzOtMSaT70q7f9ydPhpqu821w==}
+    cpu: [x64]
+    os: [win32]
+
   '@scalar/helpers@0.10.0':
     resolution: {integrity: sha512-IAfnpIZnXY6ni+zyFMwWHBa5b/7yr4mCSvoTGR84oS9q4Quy2wjgafnr7CyfL65ney3iilBZHigZYLYqdqCu3Q==}
     engines: {node: '>=22'}
@@ -2980,6 +2987,12 @@ packages:
       - '@tybys/wasm-util'
       - '@emnapi/wasi-threads'
       - tslib
+
+  '@tailwindcss/oxide-win32-x64-msvc@4.3.3':
+    resolution: {integrity: sha512-yJ0pwIVc/nYeGoV02WtsN8KYyLQv7kyI2wDnkezyJlGGjkd4QLwDGAwl47YpPJeuI0M0ObaXGSPjvWDPeTPggw==}
+    engines: {node: '>= 20'}
+    cpu: [x64]
+    os: [win32]
 
   '@tailwindcss/oxide@4.3.3':
     resolution: {integrity: sha512-krXjAikiaFSPaK/FkAQT5UTx3VormQaiZ5hBFlJZ9UFQGB/rwg1MZIhHAG9smMQRTdyJxP6Qt5MwMtdyU5FWrA==}
@@ -4747,6 +4760,12 @@ packages:
     cpu: [x64]
     os: [linux]
     libc: [glibc]
+
+  lightningcss-win32-x64-msvc@1.32.0:
+    resolution: {integrity: sha512-Amq9B/SoZYdDi1kFrojnoqPLxYhQ4Wo5XiL8EVJrVsB8ARoC1PWW6VGtT0WKCemjy8aC+louJnjS7U18x3b06Q==}
+    engines: {node: '>= 12.0.0'}
+    cpu: [x64]
+    os: [win32]
 
   lightningcss@1.32.0:
     resolution: {integrity: sha512-NXYBzinNrblfraPGyrbPoD19C1h9lfI/1mzgWYvXUTe414Gz/X1FD2XBZSZM7rRTrMA8JL3OtAaGifrIKhQ5yQ==}
@@ -7126,6 +7145,9 @@ snapshots:
   '@esbuild/linux-x64@0.28.2':
     optional: true
 
+  '@esbuild/win32-x64@0.28.2':
+    optional: true
+
   '@expo-google-fonts/dm-sans@0.4.2': {}
 
   '@expo-google-fonts/instrument-serif@0.4.1': {}
@@ -7335,7 +7357,6 @@ snapshots:
 
   '@expo/log-box@57.0.4(expo@57.0.25)(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)':
     dependencies:
-      '@expo/dom-webview': 57.0.1(expo@57.0.25)(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       anser: 1.4.10
       expo: 57.0.25(@babel/core@7.29.7)(@expo/metro-runtime@57.0.16)(expo-router@57.0.23)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.3(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7)(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
       react: 19.2.3
@@ -7388,7 +7409,6 @@ snapshots:
 
   '@expo/metro-runtime@57.0.16(expo@57.0.25)(react-dom@19.2.3(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)':
     dependencies:
-      '@expo/log-box': 57.0.4(expo@57.0.25)(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)
       anser: 1.4.10
       expo: 57.0.25(@babel/core@7.29.7)(@expo/metro-runtime@57.0.16)(expo-router@57.0.23)(react-dom@19.2.3(react@19.2.3))(react-native-web@0.21.3(react-dom@19.2.3(react@19.2.3))(react@19.2.3))(react-native-worklets@0.10.1(@babel/core@7.29.7)(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3))(react-native@0.86.3(@babel/core@7.29.7)(@types/react@19.2.18)(react@19.2.3))(react@19.2.3)(typescript@6.0.3)
       pretty-format: 29.7.0
@@ -9351,6 +9371,9 @@ snapshots:
   '@rollup/rollup-linux-x64-gnu@4.63.1':
     optional: true
 
+  '@rollup/rollup-win32-x64-msvc@4.63.1':
+    optional: true
+
   '@scalar/helpers@0.10.0': {}
 
   '@scalar/helpers@0.11.1': {}
@@ -10092,10 +10115,14 @@ snapshots:
   '@tailwindcss/oxide-wasm32-wasi@4.3.3':
     optional: true
 
+  '@tailwindcss/oxide-win32-x64-msvc@4.3.3':
+    optional: true
+
   '@tailwindcss/oxide@4.3.3':
     optionalDependencies:
       '@tailwindcss/oxide-linux-x64-gnu': 4.3.3
       '@tailwindcss/oxide-wasm32-wasi': 4.3.3
+      '@tailwindcss/oxide-win32-x64-msvc': 4.3.3
 
   '@tailwindcss/typography@0.5.20(tailwindcss@4.3.3)':
     dependencies:
@@ -11024,6 +11051,7 @@ snapshots:
   esbuild@0.28.2:
     optionalDependencies:
       '@esbuild/linux-x64': 0.28.2
+      '@esbuild/win32-x64': 0.28.2
 
   escalade@3.2.0: {}
 
@@ -11899,11 +11927,15 @@ snapshots:
   lightningcss-linux-x64-gnu@1.32.0:
     optional: true
 
+  lightningcss-win32-x64-msvc@1.32.0:
+    optional: true
+
   lightningcss@1.32.0:
     dependencies:
       detect-libc: 2.1.2
     optionalDependencies:
       lightningcss-linux-x64-gnu: 1.32.0
+      lightningcss-win32-x64-msvc: 1.32.0
 
   linkify-it@5.0.2:
     dependencies:
@@ -13229,6 +13261,7 @@ snapshots:
     optionalDependencies:
       '@napi-rs/lzma-linux-x64-gnu': 1.5.1
       '@rollup/rollup-linux-x64-gnu': 4.63.1
+      '@rollup/rollup-win32-x64-msvc': 4.63.1
       fsevents: 2.3.3
 
   router@2.2.0:

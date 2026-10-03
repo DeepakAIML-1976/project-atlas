@@ -7,6 +7,9 @@ out-tsc
 *.tsbuildinfo
 .expo
 .expo-shared
+static-build
+/artifacts/*/static-build/
+/artifacts/*/dist/
 
 # dependencies
 node_modules
