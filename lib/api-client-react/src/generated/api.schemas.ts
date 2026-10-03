@@ -697,6 +697,52 @@ export interface UpdateLiveMeetingStatusInput {
   botStatus: UpdateLiveMeetingStatusInputBotStatus;
 }
 
+export interface EmailDraftsResponse {
+  emailDrafts: AtlasEmailDraft[];
+}
+
+export interface IngestEmailInput {
+  /** @minLength 1 */
+  sender: string;
+  /** @minLength 1 */
+  subject: string;
+  /** @minLength 1 */
+  incomingBody: string;
+}
+
+export interface AtlasDelegationRule {
+  id: string;
+  domain: string;
+  category: string;
+  maxRiskLevel: string;
+  requiresHumanApproval: boolean;
+  autoExecutionEnabled: boolean;
+  createdAt: string;
+}
+
+export interface DelegationRulesResponse {
+  delegationRules: AtlasDelegationRule[];
+}
+
+export type DelegationRuleInputMaxRiskLevel = typeof DelegationRuleInputMaxRiskLevel[keyof typeof DelegationRuleInputMaxRiskLevel];
+
+
+export const DelegationRuleInputMaxRiskLevel = {
+  low: 'low',
+  medium: 'medium',
+  high: 'high',
+} as const;
+
+export interface DelegationRuleInput {
+  /** @minLength 1 */
+  domain: string;
+  /** @minLength 1 */
+  category: string;
+  maxRiskLevel?: DelegationRuleInputMaxRiskLevel;
+  requiresHumanApproval?: boolean;
+  autoExecutionEnabled?: boolean;
+}
+
 export type SearchAtlasMemoryParams = {
 /**
  * @minLength 1
@@ -707,5 +753,9 @@ q: string;
 export type GetKnowledgeUnitsParams = {
 domain?: string;
 query?: string;
+};
+
+export type GetEmailDraftsParams = {
+status?: string;
 };
 

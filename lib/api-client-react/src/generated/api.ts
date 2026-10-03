@@ -24,6 +24,8 @@ import type {
   ActionUpdate,
   ActivityEntry,
   AtlasDecision,
+  AtlasDelegationRule,
+  AtlasEmailDraft,
   AtlasKnowledgeUnit,
   AtlasLiveMeeting,
   AtlasMeeting,
@@ -39,8 +41,13 @@ import type {
   CreateLiveMeetingInput,
   DecisionInput,
   DecisionReview,
+  DelegationRuleInput,
+  DelegationRulesResponse,
+  EmailDraftsResponse,
+  GetEmailDraftsParams,
   GetKnowledgeUnitsParams,
   HealthStatus,
+  IngestEmailInput,
   IngestTranscriptInput,
   IngestTranscriptResponse,
   KnowledgeGraph,
@@ -2898,6 +2905,417 @@ export const useUpdateLiveMeetingStatus = <TError = ErrorType<unknown>,
         TContext
       > => {
       return useMutation(getUpdateLiveMeetingStatusMutationOptions(options));
+    }
+
+export const getGetEmailDraftsUrl = (params?: GetEmailDraftsParams,) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? 'null' : String(value))
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0 ? `/api/atlas/email-drafts?${stringifiedParams}` : `/api/atlas/email-drafts`
+}
+
+/**
+ * @summary List incoming emails and twin proposed draft responses
+ */
+export const getEmailDrafts = async (params?: GetEmailDraftsParams, options?: Parameters<typeof customFetch>[1]): Promise<EmailDraftsResponse> => {
+
+  return customFetch<EmailDraftsResponse>(getGetEmailDraftsUrl(params),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetEmailDraftsQueryKey = (params?: GetEmailDraftsParams,) => {
+    return [
+    `/api/atlas/email-drafts`, ...(params ? [params] : [])
+    ] as const;
+    }
+
+
+export const getGetEmailDraftsQueryOptions = <TData = Awaited<ReturnType<typeof getEmailDrafts>>, TError = ErrorType<unknown>>(params?: GetEmailDraftsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEmailDrafts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetEmailDraftsQueryKey(params);
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getEmailDrafts>>> = ({ signal }) => getEmailDrafts(params, { signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getEmailDrafts>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetEmailDraftsQueryResult = NonNullable<Awaited<ReturnType<typeof getEmailDrafts>>>
+export type GetEmailDraftsQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List incoming emails and twin proposed draft responses
+ */
+
+export function useGetEmailDrafts<TData = Awaited<ReturnType<typeof getEmailDrafts>>, TError = ErrorType<unknown>>(
+ params?: GetEmailDraftsParams, options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getEmailDrafts>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetEmailDraftsQueryOptions(params,options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getIngestEmailUrl = () => {
+
+
+
+
+  return `/api/atlas/email-drafts/ingest`
+}
+
+/**
+ * @summary Ingest an incoming email, analyze technical content, pre-draft response using tacit knowledge, and route to inbox
+ */
+export const ingestEmail = async (ingestEmailInput: IngestEmailInput, options?: Parameters<typeof customFetch>[1]): Promise<AtlasEmailDraft> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<AtlasEmailDraft>(getIngestEmailUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(ingestEmailInput)
+  }
+);}
+
+
+
+
+
+export const getIngestEmailMutationKey = () => ['ingestEmail'] as const;
+
+export const getIngestEmailMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestEmail>>, TError,IngestEmailMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof ingestEmail>>, TError,IngestEmailMutationVariables, TContext> => {
+
+const mutationKey = getIngestEmailMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof ingestEmail>>, IngestEmailMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  ingestEmail(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type IngestEmailMutationResult = NonNullable<Awaited<ReturnType<typeof ingestEmail>>>
+    export type IngestEmailMutationBody = BodyType<IngestEmailInput>
+    export type IngestEmailMutationError = ErrorType<unknown>
+    export type IngestEmailMutationVariables = {data: BodyType<IngestEmailInput>}
+
+    /**
+ * @summary Ingest an incoming email, analyze technical content, pre-draft response using tacit knowledge, and route to inbox
+ */
+export const useIngestEmail = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof ingestEmail>>, TError,IngestEmailMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof ingestEmail>>,
+        TError,
+        IngestEmailMutationVariables,
+        TContext
+      > => {
+      return useMutation(getIngestEmailMutationOptions(options));
+    }
+
+export const getGetDelegationRulesUrl = () => {
+
+
+
+
+  return `/api/atlas/delegation-rules`
+}
+
+/**
+ * @summary List workspace delegation rules and risk boundaries
+ */
+export const getDelegationRules = async ( options?: Parameters<typeof customFetch>[1]): Promise<DelegationRulesResponse> => {
+
+  return customFetch<DelegationRulesResponse>(getGetDelegationRulesUrl(),
+  {
+    ...options,
+    method: 'GET'
+
+
+  }
+);}
+
+
+
+
+
+export const getGetDelegationRulesQueryKey = () => {
+    return [
+    `/api/atlas/delegation-rules`
+    ] as const;
+    }
+
+
+export const getGetDelegationRulesQueryOptions = <TData = Awaited<ReturnType<typeof getDelegationRules>>, TError = ErrorType<unknown>>( options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDelegationRules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+) => {
+
+const {query: queryOptions, request: requestOptions} = options ?? {};
+
+  const queryKey =  queryOptions?.queryKey ?? getGetDelegationRulesQueryKey();
+
+
+
+    const queryFn: QueryFunction<Awaited<ReturnType<typeof getDelegationRules>>> = ({ signal }) => getDelegationRules({ signal, ...requestOptions });
+
+
+
+
+
+   return  { queryKey, queryFn, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof getDelegationRules>>, TError, TData> & { queryKey: QueryKey }
+}
+
+export type GetDelegationRulesQueryResult = NonNullable<Awaited<ReturnType<typeof getDelegationRules>>>
+export type GetDelegationRulesQueryError = ErrorType<unknown>
+
+
+/**
+ * @summary List workspace delegation rules and risk boundaries
+ */
+
+export function useGetDelegationRules<TData = Awaited<ReturnType<typeof getDelegationRules>>, TError = ErrorType<unknown>>(
+  options?: { query?:UseQueryOptions<Awaited<ReturnType<typeof getDelegationRules>>, TError, TData>, request?: SecondParameter<typeof customFetch>}
+
+ ):  UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+
+  const queryOptions = getGetDelegationRulesQueryOptions(options)
+
+  const query = useQuery(queryOptions) as  UseQueryResult<TData, TError> & { queryKey: QueryKey };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+
+
+
+
+
+
+export const getCreateDelegationRuleUrl = () => {
+
+
+
+
+  return `/api/atlas/delegation-rules`
+}
+
+/**
+ * @summary Create or update a domain delegation rule and autonomy boundary
+ */
+export const createDelegationRule = async (delegationRuleInput: DelegationRuleInput, options?: Parameters<typeof customFetch>[1]): Promise<AtlasDelegationRule> => {
+
+    const getHeaders = (h?: NonNullable<RequestInit['headers']>): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(h as Iterable<Iterable<string>>, (entry) => Array.from(entry) as [string, string]),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<string | readonly string[] | undefined>(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+return customFetch<AtlasDelegationRule>(getCreateDelegationRuleUrl(),
+  {
+    ...options,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', ...getHeaders(options?.headers) },
+    body: JSON.stringify(delegationRuleInput)
+  }
+);}
+
+
+
+
+
+export const getCreateDelegationRuleMutationKey = () => ['createDelegationRule'] as const;
+
+export const getCreateDelegationRuleMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDelegationRule>>, TError,CreateDelegationRuleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof createDelegationRule>>, TError,CreateDelegationRuleMutationVariables, TContext> => {
+
+const mutationKey = getCreateDelegationRuleMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof createDelegationRule>>, CreateDelegationRuleMutationVariables> = (props) => {
+          const {data} = props ?? {};
+
+          return  createDelegationRule(data,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type CreateDelegationRuleMutationResult = NonNullable<Awaited<ReturnType<typeof createDelegationRule>>>
+    export type CreateDelegationRuleMutationBody = BodyType<DelegationRuleInput>
+    export type CreateDelegationRuleMutationError = ErrorType<unknown>
+    export type CreateDelegationRuleMutationVariables = {data: BodyType<DelegationRuleInput>}
+
+    /**
+ * @summary Create or update a domain delegation rule and autonomy boundary
+ */
+export const useCreateDelegationRule = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDelegationRule>>, TError,CreateDelegationRuleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof createDelegationRule>>,
+        TError,
+        CreateDelegationRuleMutationVariables,
+        TContext
+      > => {
+      return useMutation(getCreateDelegationRuleMutationOptions(options));
+    }
+
+export const getDeleteDelegationRuleUrl = (id: string,) => {
+
+
+
+
+  return `/api/atlas/delegation-rules/${id}`
+}
+
+/**
+ * @summary Delete a workspace delegation rule
+ */
+export const deleteDelegationRule = async (id: string, options?: Parameters<typeof customFetch>[1]): Promise<void> => {
+
+  return customFetch<void>(getDeleteDelegationRuleUrl(id),
+  {
+    ...options,
+    method: 'DELETE'
+
+
+  }
+);}
+
+
+
+
+
+export const getDeleteDelegationRuleMutationKey = () => ['deleteDelegationRule'] as const;
+
+export const getDeleteDelegationRuleMutationOptions = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDelegationRule>>, TError,DeleteDelegationRuleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+): UseMutationOptions<Awaited<ReturnType<typeof deleteDelegationRule>>, TError,DeleteDelegationRuleMutationVariables, TContext> => {
+
+const mutationKey = getDeleteDelegationRuleMutationKey();
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof deleteDelegationRule>>, DeleteDelegationRuleMutationVariables> = (props) => {
+          const {id} = props ?? {};
+
+          return  deleteDelegationRule(id,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type DeleteDelegationRuleMutationResult = NonNullable<Awaited<ReturnType<typeof deleteDelegationRule>>>
+
+    export type DeleteDelegationRuleMutationError = ErrorType<unknown>
+    export type DeleteDelegationRuleMutationVariables = {id: string}
+
+    /**
+ * @summary Delete a workspace delegation rule
+ */
+export const useDeleteDelegationRule = <TError = ErrorType<unknown>,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDelegationRule>>, TError,DeleteDelegationRuleMutationVariables, TContext>, request?: SecondParameter<typeof customFetch>}
+ ): UseMutationResult<
+        Awaited<ReturnType<typeof deleteDelegationRule>>,
+        TError,
+        DeleteDelegationRuleMutationVariables,
+        TContext
+      > => {
+      return useMutation(getDeleteDelegationRuleMutationOptions(options));
     }
 
 export const getRequestUploadUrlUrl = () => {

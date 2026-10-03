@@ -601,6 +601,85 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/AtlasLiveMeeting"
+  /atlas/email-drafts:
+    get:
+      operationId: getEmailDrafts
+      tags: [Atlas]
+      summary: List incoming emails and twin proposed draft responses
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of email drafts
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EmailDraftsResponse"
+  /atlas/email-drafts/ingest:
+    post:
+      operationId: ingestEmail
+      tags: [Atlas]
+      summary: Ingest an incoming email, analyze technical content, pre-draft response using tacit knowledge, and route to inbox
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestEmailInput"
+      responses:
+        "201":
+          description: Email ingested and twin draft created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasEmailDraft"
+  /atlas/delegation-rules:
+    get:
+      operationId: getDelegationRules
+      tags: [Atlas]
+      summary: List workspace delegation rules and risk boundaries
+      responses:
+        "200":
+          description: Delegation rules list
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DelegationRulesResponse"
+    post:
+      operationId: createDelegationRule
+      tags: [Atlas]
+      summary: Create or update a domain delegation rule and autonomy boundary
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DelegationRuleInput"
+      responses:
+        "201":
+          description: Delegation rule created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AtlasDelegationRule"
+  /atlas/delegation-rules/{id}:
+    delete:
+      operationId: deleteDelegationRule
+      tags: [Atlas]
+      summary: Delete a workspace delegation rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Delegation rule deleted
   /storage/uploads/request-url:
     post:
       operationId: requestUploadUrl
@@ -1212,6 +1291,50 @@ components:
         botStatus:
           type: string
           enum: [joining, in_call, left, errored]
+    EmailDraftsResponse:
+      type: object
+      required: [emailDrafts]
+      properties:
+        emailDrafts:
+          type: array
+          items: { $ref: "#/components/schemas/AtlasEmailDraft" }
+    IngestEmailInput:
+      type: object
+      required: [sender, subject, incomingBody]
+      properties:
+        sender: { type: string, minLength: 1 }
+        subject: { type: string, minLength: 1 }
+        incomingBody: { type: string, minLength: 1 }
+    AtlasDelegationRule:
+      type: object
+      required: [id, domain, category, maxRiskLevel, requiresHumanApproval, autoExecutionEnabled, createdAt]
+      properties:
+        id: { type: string }
+        domain: { type: string }
+        category: { type: string }
+        maxRiskLevel: { type: string }
+        requiresHumanApproval: { type: boolean }
+        autoExecutionEnabled: { type: boolean }
+        createdAt: { type: string, format: date-time }
+    DelegationRulesResponse:
+      type: object
+      required: [delegationRules]
+      properties:
+        delegationRules:
+          type: array
+          items: { $ref: "#/components/schemas/AtlasDelegationRule" }
+    DelegationRuleInput:
+      type: object
+      required: [domain, category]
+      properties:
+        domain: { type: string, minLength: 1 }
+        category: { type: string, minLength: 1 }
+        maxRiskLevel:
+          type: string
+          enum: [low, medium, high]
+        requiresHumanApproval: { type: boolean }
+        autoExecutionEnabled: { type: boolean }
+
 
 
 

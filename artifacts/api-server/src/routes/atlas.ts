@@ -53,6 +53,11 @@ import {
   IngestLiveTranscriptBody,
   IngestLiveTranscriptResponse,
   UpdateLiveMeetingStatusBody,
+  GetEmailDraftsQueryParams,
+  GetEmailDraftsResponse,
+  IngestEmailBody,
+  GetDelegationRulesResponse,
+  CreateDelegationRuleBody,
 } from "@workspace/api-zod";
 import {
   atlasActionsTable,
@@ -71,6 +76,7 @@ import {
   atlasMeetingTriggersTable,
   atlasKnowledgeUnitsTable,
   atlasLiveMeetingsTable,
+  atlasDelegationRulesTable,
   db,
 } from "@workspace/db";
 import {
@@ -84,6 +90,7 @@ import {
 } from "../lib/atlas";
 import { extractCorrectionKnowledgeUnit } from "../lib/atlasAI";
 import { processLiveTranscriptChunk } from "../lib/atlasMeetingBot";
+import { processIncomingEmail } from "../lib/atlasEmailIngest";
 
 const router: IRouter = Router();
 const recordTypes = ["source", "meeting", "decision"] as const;
@@ -1582,6 +1589,109 @@ router.patch("/atlas/live-meetings/:id/status", async (req, res): Promise<void> 
   await activity(context.workspaceId, context.userId, "updated_status", "live_meeting", id);
 
   res.json(updated);
+});
+
+router.get("/atlas/email-drafts", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+
+  const parsed = GetEmailDraftsQueryParams.safeParse(req.query);
+  const statusFilter = parsed.success ? parsed.data.status : undefined;
+
+  const emailDrafts = await db
+    .select()
+    .from(atlasEmailDraftsTable)
+    .where(
+      and(
+        eq(atlasEmailDraftsTable.workspaceId, context.workspaceId),
+        statusFilter ? eq(atlasEmailDraftsTable.status, statusFilter) : undefined,
+      ),
+    )
+    .orderBy(desc(atlasEmailDraftsTable.createdAt));
+
+  res.json(GetEmailDraftsResponse.parse({ emailDrafts }));
+});
+
+router.post("/atlas/email-drafts/ingest", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const parsed = IngestEmailBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const draft = await processIncomingEmail(
+    context.workspaceId,
+    context.userId,
+    parsed.data.sender,
+    parsed.data.subject,
+    parsed.data.incomingBody,
+  );
+
+  res.status(201).json(draft);
+});
+
+router.get("/atlas/delegation-rules", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+
+  const delegationRules = await db
+    .select()
+    .from(atlasDelegationRulesTable)
+    .where(eq(atlasDelegationRulesTable.workspaceId, context.workspaceId))
+    .orderBy(desc(atlasDelegationRulesTable.createdAt));
+
+  res.json(GetDelegationRulesResponse.parse({ delegationRules }));
+});
+
+router.post("/atlas/delegation-rules", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const parsed = CreateDelegationRuleBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const [created] = await db
+    .insert(atlasDelegationRulesTable)
+    .values({
+      workspaceId: context.workspaceId,
+      domain: parsed.data.domain,
+      category: parsed.data.category,
+      maxRiskLevel: parsed.data.maxRiskLevel || "low",
+      requiresHumanApproval: parsed.data.requiresHumanApproval ?? true,
+      autoExecutionEnabled: parsed.data.autoExecutionEnabled ?? false,
+    })
+    .returning();
+
+  await activity(context.workspaceId, context.userId, "created", "delegation_rule", created.id);
+
+  res.status(201).json(created);
+});
+
+router.delete("/atlas/delegation-rules/:id", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const { id } = req.params;
+  await db
+    .delete(atlasDelegationRulesTable)
+    .where(
+      and(
+        eq(atlasDelegationRulesTable.id, id),
+        eq(atlasDelegationRulesTable.workspaceId, context.workspaceId),
+      ),
+    );
+
+  await activity(context.workspaceId, context.userId, "deleted", "delegation_rule", id);
+  res.status(204).send();
 });
 
 export default router;

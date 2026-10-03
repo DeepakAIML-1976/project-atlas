@@ -947,6 +947,109 @@ export const UpdateLiveMeetingStatusResponse = zod.object({
 
 
 /**
+ * @summary List incoming emails and twin proposed draft responses
+ */
+export const GetEmailDraftsQueryParams = zod.object({
+  "status": zod.coerce.string().optional()
+})
+
+export const GetEmailDraftsResponse = zod.object({
+  "emailDrafts": zod.array(zod.object({
+  "id": zod.string(),
+  "sender": zod.string(),
+  "subject": zod.string(),
+  "incomingBody": zod.string(),
+  "twinDraftResponse": zod.string(),
+  "reasoning": zod.string().nullish(),
+  "confidence": zod.number().nullish(),
+  "status": zod.string(),
+  "authorizedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Ingest an incoming email, analyze technical content, pre-draft response using tacit knowledge, and route to inbox
+ */
+
+
+
+
+
+export const IngestEmailBody = zod.object({
+  "sender": zod.string().min(1),
+  "subject": zod.string().min(1),
+  "incomingBody": zod.string().min(1)
+})
+
+export const IngestEmailResponse = zod.object({
+  "id": zod.string(),
+  "sender": zod.string(),
+  "subject": zod.string(),
+  "incomingBody": zod.string(),
+  "twinDraftResponse": zod.string(),
+  "reasoning": zod.string().nullish(),
+  "confidence": zod.number().nullish(),
+  "status": zod.string(),
+  "authorizedAt": zod.coerce.date().nullish(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary List workspace delegation rules and risk boundaries
+ */
+export const GetDelegationRulesResponse = zod.object({
+  "delegationRules": zod.array(zod.object({
+  "id": zod.string(),
+  "domain": zod.string(),
+  "category": zod.string(),
+  "maxRiskLevel": zod.string(),
+  "requiresHumanApproval": zod.boolean(),
+  "autoExecutionEnabled": zod.boolean(),
+  "createdAt": zod.coerce.date()
+}))
+})
+
+
+/**
+ * @summary Create or update a domain delegation rule and autonomy boundary
+ */
+
+
+
+
+export const CreateDelegationRuleBody = zod.object({
+  "domain": zod.string().min(1),
+  "category": zod.string().min(1),
+  "maxRiskLevel": zod.enum(['low', 'medium', 'high']).optional(),
+  "requiresHumanApproval": zod.boolean().optional(),
+  "autoExecutionEnabled": zod.boolean().optional()
+})
+
+export const CreateDelegationRuleResponse = zod.object({
+  "id": zod.string(),
+  "domain": zod.string(),
+  "category": zod.string(),
+  "maxRiskLevel": zod.string(),
+  "requiresHumanApproval": zod.boolean(),
+  "autoExecutionEnabled": zod.boolean(),
+  "createdAt": zod.coerce.date()
+})
+
+
+/**
+ * @summary Delete a workspace delegation rule
+ */
+export const DeleteDelegationRuleParams = zod.object({
+  "id": zod.coerce.string()
+})
+
+export const DeleteDelegationRuleResponse = zod.void()
+
+
+/**
  * @summary Request a private presigned URL for a user-provided source
  */
 
