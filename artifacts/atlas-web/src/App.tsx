@@ -17,10 +17,12 @@ import { EmailInbox } from '@/pages/email-inbox';
 import { DelegationRules } from '@/pages/delegation-rules';
 
 const queryClient = new QueryClient({defaultOptions:{queries:{retry:1,refetchOnWindowFocus:false}}});
+const rawClerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? "";
 const clerkPubKey = publishableKeyFromHost(
   window.location.hostname,
-  import.meta.env.VITE_CLERK_PUBLISHABLE_KEY,
+  rawClerkKey,
 );
+const hasClerkKey = Boolean(clerkPubKey && clerkPubKey.trim().length > 0 && clerkPubKey.startsWith("pk_"));
 const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
 function stripBase(path:string):string {return basePath&&path.startsWith(basePath)?path.slice(basePath.length)||"/":path;}
@@ -42,6 +44,7 @@ const appearance = {
 };
 
 function CacheResetOnUserChange(){
+  if (!hasClerkKey) return null;
   const {addListener}=useClerk(); const qc=useQueryClient();const prior=useRef<string|null|undefined>(undefined);
   useEffect(()=>{const unsub=addListener(({user})=>{const id=user?.id??null;if(prior.current!==undefined&&prior.current!==id)qc.clear();prior.current=id;});return unsub;},[addListener,qc]);
   return null;
@@ -59,7 +62,10 @@ function AuthPage({mode}:{mode:'in'|'up'}){
     </div>
   </div>;
 }
-function Home(){return <><Show when="signed-in"><Redirect to="/overview"/></Show><Show when="signed-out"><Landing/></Show></>;}
+function Home(){
+  if (!hasClerkKey) return <Redirect to="/overview"/>;
+  return <><Show when="signed-in"><Redirect to="/overview"/></Show><Show when="signed-out"><Landing/></Show></>;
+}
 function Workspace({children}:{children:ReactNode}){
   const session=useGetAtlasSession();
   if(session.isLoading)return <div style={{minHeight:'100dvh',padding:'15vw'}}><Load count={3}/></div>;
@@ -67,7 +73,10 @@ function Workspace({children}:{children:ReactNode}){
   if(!session.data?.workspace)return <Onboarding/>;
   return <Shell workspace={session.data.workspace.name}>{children}</Shell>;
 }
-function Protected({children}:{children:ReactNode}){return <><Show when="signed-in"><Workspace>{children}</Workspace></Show><Show when="signed-out"><Redirect to="/"/></Show></>;}
+function Protected({children}:{children:ReactNode}){
+  if (!hasClerkKey) return <Workspace>{children}</Workspace>;
+  return <><Show when="signed-in"><Workspace>{children}</Workspace></Show><Show when="signed-out"><Redirect to="/"/></Show></>;
+}
 function Routed({children}:{children:ReactNode}){const [location]=useLocation();return <ErrorBoundary resetKey={location}>{children}</ErrorBoundary>;}
 function NotFound(){return <div style={{minHeight:'100dvh',display:'grid',placeItems:'center',padding:25,textAlign:'center'}}><div><div className="eyebrow">404 / NOT FOUND</div><h1 className="page-title">This path goes <em>nowhere.</em></h1><p className="page-lede" style={{margin:'0 auto 24px'}}>There is no page at this address. Your workspace is still where you left it.</p><Link href="/overview" className="btn btn-primary" data-testid="link-not-found-overview">Go to workspace</Link></div></div>;}
 function Routes(){return <Routed><Switch>
@@ -90,6 +99,9 @@ function Routes(){return <Routed><Switch>
 </Switch></Routed>;}
 function ClerkRoutes(){
   const [,setLocation]=useLocation();
+  if (!hasClerkKey) {
+    return <QueryClientProvider client={queryClient}><Routes/></QueryClientProvider>;
+  }
   return <ClerkProvider publishableKey={clerkPubKey} proxyUrl={clerkProxyUrl} appearance={appearance} signInUrl={`${basePath}/sign-in`} signUpUrl={`${basePath}/sign-up`}
     localization={{signIn:{start:{title:'Welcome back',subtitle:'Return to your private Atlas workspace'}},signUp:{start:{title:'Begin on your terms',subtitle:'Your workspace starts empty'}}}}
     routerPush={to=>setLocation(stripBase(to))} routerReplace={to=>setLocation(stripBase(to),{replace:true})}>
