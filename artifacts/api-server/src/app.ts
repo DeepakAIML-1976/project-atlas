@@ -61,9 +61,11 @@ const staticDir = fs.existsSync(webDistPath)
 if (staticDir) {
   logger.info({ staticDir }, "Serving static web assets from");
   app.use(express.static(staticDir));
-  app.get("*", (req, res, next) => {
-    if (req.path.startsWith("/api")) return next();
-    res.sendFile(path.join(staticDir, "index.html"));
+  app.use((req, res, next) => {
+    if (req.method === "GET" && !req.path.startsWith("/api")) {
+      return res.sendFile(path.join(staticDir, "index.html"));
+    }
+    next();
   });
 } else {
   app.get("/", (_req, res) => {
