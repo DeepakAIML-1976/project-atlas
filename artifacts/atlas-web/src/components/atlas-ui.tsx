@@ -22,9 +22,18 @@ export function Brand({ light = false }: { light?:boolean }) {
   return <Link href="/" className="brand" data-testid="link-atlas-home"><span className="brand-mark">a</span><span className="brand-text" style={{color:light?'#292538':undefined}}>atlas<span style={{color:'#c97b59'}}>.</span></span></Link>;
 }
 
+function useSignOutHandler() {
+  try {
+    const clerk = useClerk();
+    return () => clerk.signOut({ redirectUrl: import.meta.env.BASE_URL });
+  } catch {
+    return () => { window.location.href = import.meta.env.BASE_URL || '/'; };
+  }
+}
+
 export function Shell({ children, workspace }: { children:ReactNode; workspace?:string }) {
   const [location] = useLocation();
-  const { signOut } = useClerk();
+  const handleSignOut = useSignOutHandler();
   const current = links.find(l=>l.href===location)?.label ?? 'Workspace';
   return <div className="app-shell">
     <aside className="sidebar">
@@ -34,7 +43,7 @@ export function Shell({ children, workspace }: { children:ReactNode; workspace?:
       <div className="sidebar-bottom">
         <div className="eyebrow" style={{color:'#dba581',fontSize:9}}>CURRENT SPACE</div>
         <p style={{margin:'8px 0 18px',fontSize:12,color:'#e8e1dc',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} data-testid="text-workspace-name">{workspace || 'Your workspace'}</p>
-        <button className="nav-item" style={{width:'100%',border:0,background:'transparent'}} onClick={()=>signOut({redirectUrl:import.meta.env.BASE_URL})} data-testid="button-sign-out"><LogOut/><span>Sign out</span></button>
+        <button className="nav-item" style={{width:'100%',border:0,background:'transparent'}} onClick={handleSignOut} data-testid="button-sign-out"><LogOut/><span>Sign out</span></button>
       </div>
     </aside>
     <div className="shell-main">

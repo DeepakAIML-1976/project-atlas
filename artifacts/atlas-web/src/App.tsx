@@ -18,10 +18,17 @@ import { DelegationRules } from '@/pages/delegation-rules';
 
 const queryClient = new QueryClient({defaultOptions:{queries:{retry:1,refetchOnWindowFocus:false}}});
 const rawClerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? "";
-const clerkPubKey = publishableKeyFromHost(
-  window.location.hostname,
-  rawClerkKey,
-);
+let clerkPubKey = "";
+try {
+  if (rawClerkKey && rawClerkKey.trim().length > 0) {
+    clerkPubKey = publishableKeyFromHost(
+      window.location.hostname,
+      rawClerkKey,
+    );
+  }
+} catch {
+  clerkPubKey = "";
+}
 const hasClerkKey = Boolean(clerkPubKey && clerkPubKey.trim().length > 0 && clerkPubKey.startsWith("pk_"));
 const clerkProxyUrl = import.meta.env.VITE_CLERK_PROXY_URL;
 const basePath = import.meta.env.BASE_URL.replace(/\/$/, "");
