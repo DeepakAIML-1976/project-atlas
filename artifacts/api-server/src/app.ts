@@ -1,6 +1,8 @@
 import express, { type Express } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
+import path from "node:path";
+import fs from "node:fs";
 import { clerkMiddleware } from "@clerk/express";
 import { publishableKeyFromHost } from "@clerk/shared/keys";
 import { CLERK_PROXY_PATH, clerkProxyMiddleware, getClerkProxyHost } from "./middlewares/clerkProxyMiddleware";
@@ -46,5 +48,37 @@ if (process.env.CLERK_SECRET_KEY) {
 }
 
 app.use("/api", router);
+
+// Serve built web frontend static files if available
+const webDistPath = path.resolve(process.cwd(), "artifacts/atlas-web/dist/public");
+const fallbackWebDistPath = path.resolve(process.cwd(), "../atlas-web/dist/public");
+const staticDir = fs.existsSync(webDistPath)
+  ? webDistPath
+  : fs.existsSync(fallbackWebDistPath)
+  ? fallbackWebDistPath
+  : null;
+
+if (staticDir) {
+  logger.info({ staticDir }, "Serving static web assets from");
+  app.use(express.static(staticDir));
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api")) return next();
+    res.sendFile(path.join(staticDir, "index.html"));
+  });
+} else {
+  app.get("/", (_req, res) => {
+    res.send(
+      `<!DOCTYPE html>
+      <html>
+        <head><title>Deepak's Digital Twin Suite API</title></head>
+        <body style="font-family: sans-serif; padding: 40px; background: #faf9f6; color: #333;">
+          <h2>Deepak's Digital Twin Suite API Server</h2>
+          <p>The backend API server is running successfully at <code>/api</code>.</p>
+          <p>To view the full Web UI, please run the frontend dev server via <code>pnpm dev:web</code> or build static assets via <code>pnpm --filter @workspace/atlas-web run build</code>.</p>
+        </body>
+      </html>`
+    );
+  });
+}
 
 export default app;
