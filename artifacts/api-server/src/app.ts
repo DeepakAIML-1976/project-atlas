@@ -49,6 +49,15 @@ if (process.env.CLERK_SECRET_KEY) {
 
 app.use("/api", router);
 
+// Error logging middleware
+app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
+  logger.error({ err, url: req.originalUrl || req.url, method: req.method }, "Express unhandled route error");
+  if (res.headersSent) {
+    return next(err);
+  }
+  res.status(500).json({ error: err?.message || "Internal server error" });
+});
+
 // Serve built web frontend static files if available
 const webDistPath = path.resolve(process.cwd(), "artifacts/atlas-web/dist/public");
 const fallbackWebDistPath = path.resolve(process.cwd(), "../atlas-web/dist/public");

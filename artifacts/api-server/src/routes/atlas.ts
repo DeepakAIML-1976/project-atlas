@@ -227,10 +227,26 @@ router.post("/atlas/workspaces", async (req, res): Promise<void> => {
 router.get("/atlas/overview", async (req, res): Promise<void> => {
   const context = await workspaceContext(req, res);
   if (!context) return;
-  const [workspace] = await db
+  let [workspace] = await db
     .select()
     .from(atlasWorkspacesTable)
     .where(eq(atlasWorkspacesTable.id, context.workspaceId));
+
+  if (!workspace) {
+    const allWorkspaces = await db.select().from(atlasWorkspacesTable).limit(1);
+    workspace = allWorkspaces[0];
+  }
+
+  if (!workspace) {
+    const [newWs] = await db
+      .insert(atlasWorkspacesTable)
+      .values({
+        name: "Deepak's Piping Engineering Workspace",
+        industry: "Oil & Gas Piping Engineering",
+      })
+      .returning();
+    workspace = newWs;
+  }
   const twins = await db
     .select()
     .from(atlasTwinsTable)
