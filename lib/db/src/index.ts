@@ -4,40 +4,45 @@ import * as schema from "./schema";
 
 const { Pool } = pg;
 
-function safeParseConnectionString(rawUrl: string): string {
-  let cleaned = rawUrl.trim().replace(/^["']|["']$/g, "");
+function parseConnectionStringToPgConfig(rawUrl: string): pg.PoolConfig {
+  const cleaned = rawUrl.trim().replace(/^["']|["']$/g, "");
+  const isSupabaseOrCloud =
+    cleaned.includes("supabase") ||
+    cleaned.includes("sslmode=require") ||
+    cleaned.includes("pooler.supabase.com");
+
+  // Try standard URL parser first
   try {
-    new URL(cleaned);
-    return cleaned;
+    const parsed = new URL(cleaned);
+    return {
+      host: parsed.hostname,
+      port: parsed.port ? parseInt(parsed.port, 10) : 5432,
+      user: decodeURIComponent(parsed.username),
+      password: decodeURIComponent(parsed.password),
+      database: parsed.pathname ? parsed.pathname.replace(/^\//, "") : "postgres",
+      ssl: isSupabaseOrCloud ? { rejectUnauthorized: false } : undefined,
+    };
   } catch {
-    // Attempt auto-encoding of password if user:pass@host format has unencoded @ or special chars in password
-    const lastAtIndex = cleaned.lastIndexOf("@");
-    if (lastAtIndex > 0) {
-      const schemeEnd = cleaned.indexOf("://");
-      if (schemeEnd > 0) {
-        const proto = cleaned.substring(0, schemeEnd + 3);
-        const rest = cleaned.substring(schemeEnd + 3);
-        const lastAtInRest = rest.lastIndexOf("@");
-        if (lastAtInRest > 0) {
-          const userInfo = rest.substring(0, lastAtInRest);
-          const hostAndPath = rest.substring(lastAtInRest + 1);
-          const firstColon = userInfo.indexOf(":");
-          if (firstColon > 0) {
-            const user = userInfo.substring(0, firstColon);
-            const pass = userInfo.substring(firstColon + 1);
-            const encodedPass = encodeURIComponent(pass);
-            const reassembled = `${proto}${user}:${encodedPass}@${hostAndPath}`;
-            try {
-              new URL(reassembled);
-              return reassembled;
-            } catch {
-              // Fall through
-            }
-          }
-        }
-      }
+    // Regex parser for connection strings with unencoded special characters in password or username
+    const match = cleaned.match(/^(postgres(?:ql)?:\/\/)([^:]+):(.*)@([^:\/]+)(?::(\d+))?\/(.+)$/);
+    if (match) {
+      const [, , user, pass, host, portStr, dbName] = match;
+      const cleanDbName = dbName.split("?")[0];
+
+      return {
+        host: host,
+        port: portStr ? parseInt(portStr, 10) : 5432,
+        user: decodeURIComponent(user),
+        password: decodeURIComponent(pass),
+        database: cleanDbName,
+        ssl: isSupabaseOrCloud ? { rejectUnauthorized: false } : undefined,
+      };
     }
-    return cleaned;
+
+    return {
+      connectionString: cleaned,
+      ssl: isSupabaseOrCloud ? { rejectUnauthorized: false } : undefined,
+    };
   }
 }
 
@@ -48,17 +53,9 @@ if (!rawDbUrl.trim()) {
   );
 }
 
-const connectionString = safeParseConnectionString(rawDbUrl);
+const pgConfig = parseConnectionStringToPgConfig(rawDbUrl);
 
-const isSupabaseOrCloud =
-  connectionString.includes("supabase") ||
-  connectionString.includes("sslmode=require") ||
-  connectionString.includes("pooler.supabase.com");
-
-export const pool = new Pool({
-  connectionString,
-  ...(isSupabaseOrCloud ? { ssl: { rejectUnauthorized: false } } : {}),
-});
+export const pool = new Pool(pgConfig);
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";
