@@ -55,14 +55,20 @@ export async function workspaceContext(
 ): Promise<AtlasContext | null> {
   const userId = await authenticatedUser(req, res);
   if (!userId) return null;
+
   const memberships = await db
     .select()
     .from(atlasMembershipsTable)
     .where(eq(atlasMembershipsTable.userId, userId))
     .limit(1);
   let membership = memberships[0];
-  if (!membership) {
-    // Auto-provision default SME workspace & membership if running locally
+
+  let validWorkspace = membership
+    ? (await db.select().from(atlasWorkspacesTable).where(eq(atlasWorkspacesTable.id, membership.workspaceId)).limit(1))[0]
+    : null;
+
+  if (!membership || !validWorkspace) {
+    // Auto-provision default SME workspace & membership if running locally or if missing
     const workspaces = await db.select().from(atlasWorkspacesTable).limit(1);
     let workspaceId: string;
     if (workspaces.length > 0) {
@@ -78,15 +84,23 @@ export async function workspaceContext(
       workspaceId = newWorkspace.id;
     }
 
-    const [newMembership] = await db
-      .insert(atlasMembershipsTable)
-      .values({
-        workspaceId,
-        userId,
-        role: "owner",
-      })
-      .returning();
-    membership = newMembership;
+    if (!membership) {
+      const [newMembership] = await db
+        .insert(atlasMembershipsTable)
+        .values({
+          workspaceId,
+          userId,
+          role: "owner",
+        })
+        .returning();
+      membership = newMembership;
+    } else {
+      await db
+        .update(atlasMembershipsTable)
+        .set({ workspaceId })
+        .where(eq(atlasMembershipsTable.id, membership.id));
+      membership.workspaceId = workspaceId;
+    }
 
     const twins = await db
       .select()
@@ -102,10 +116,11 @@ export async function workspaceContext(
       });
     }
   }
+
   return {
     userId,
     workspaceId: membership.workspaceId,
-    role: membership.role as AtlasRole,
+    role: (membership.role as AtlasRole) || "owner",
   };
 }
 
