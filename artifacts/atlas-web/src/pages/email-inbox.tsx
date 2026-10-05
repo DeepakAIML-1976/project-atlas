@@ -76,16 +76,38 @@ export function EmailInbox() {
         eyebrow="COGNITIVE SUITE / EMAIL INGESTION & TWIN DRAFTS"
         title="Email Ingestion & Pre-Drafting"
         italic="replies drafted for you."
-        description="Your AI Digital Twin reads incoming technical inquiries, scans your 35-year Piping SME heuristics, pre-drafts rigorous response emails, and routes them to your Executive Authorization Inbox for sign-off."
+        description="Your AI Digital Twin reads incoming technical inquiries from your live Outlook inbox via Microsoft Graph API, scans your 35-year Piping SME heuristics, pre-drafts rigorous response emails, and routes them to your Executive Authorization Inbox for sign-off."
         action={
-          <button className="btn btn-primary" onClick={() => setIsIngesting(true)}>
-            <Plus size={15} /> Simulate Incoming Email
-          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              className="btn btn-outline"
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/atlas/integrations/outlook/sync', { method: 'POST' });
+                  const data = await res.json();
+                  if (!res.ok || !data.success) {
+                    alert(`Live Outlook Sync Setup Required:\n\n${data.error || 'Configure Microsoft Graph API credentials in your .env file.'}\n\nKey: MS_GRAPH_ACCESS_TOKEN or MS_GRAPH_CLIENT_ID`);
+                  } else {
+                    alert(`Successfully synced ${data.count} live emails from Outlook Inbox!`);
+                    queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
+                  }
+                } catch (err: any) {
+                  alert(`Outlook Sync Error: ${err.message}`);
+                }
+              }}
+            >
+              <Mail size={15} /> Sync Live Outlook Inbox
+            </button>
+            <button className="btn btn-primary" onClick={() => setIsIngesting(true)}>
+              <Plus size={15} /> Ingest Technical Query
+            </button>
+          </div>
         }
       />
 
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 10 }}>
+          <span className="badge green">Live Outlook Webhook Ready</span>
           <span className="badge green">Consent-First Routing Active</span>
           <span className="badge">{drafts.length} Ingested Emails</span>
         </div>

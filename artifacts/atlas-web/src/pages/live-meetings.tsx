@@ -157,11 +157,53 @@ export function LiveMeetings() {
         eyebrow="COGNITIVE SUITE / LIVE MEETING BOT & ACOUSTIC TRIGGER ENGINE"
         title="Live Meeting AI Representative"
         italic="always identified."
-        description="Deploys your digital twin as an explicitly labeled AI bot ('Deepak's AI Representative (Atlas)') to Teams/Zoom meetings. Listens to live conversation, logs notes/actions, and triggers name wake-up alerts directly to your Executive Authorization Inbox."
+        description="Deploys your digital twin as an explicitly labeled AI bot ('Deepak's AI Representative (Atlas)') to live Teams/Zoom meetings. Listens to live conversation, logs notes/actions, and triggers name wake-up alerts directly to your Executive Authorization Inbox."
         action={
-          <button className="btn btn-primary" onClick={() => setIsDeploying(true)}>
-            <Plus size={15} /> Deploy Bot to Meeting
-          </button>
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              className="btn btn-outline"
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/atlas/integrations/teams/sync', { method: 'POST' });
+                  const data = await res.json();
+                  if (!res.ok || !data.success) {
+                    alert(`Live Teams Sync Setup Required:\n\n${data.error || 'Configure Microsoft Graph API credentials in your .env file.'}\n\nKey: MS_GRAPH_ACCESS_TOKEN or MS_GRAPH_CLIENT_ID`);
+                  } else {
+                    alert(`Successfully synced ${data.count} live MS Teams online meetings!`);
+                    queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
+                  }
+                } catch (err: any) {
+                  alert(`Teams Sync Error: ${err.message}`);
+                }
+              }}
+            >
+              <Video size={15} /> Sync Live MS Teams
+            </button>
+
+            <button
+              className="btn btn-outline"
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/atlas/integrations/zoom/sync', { method: 'POST' });
+                  const data = await res.json();
+                  if (!res.ok || !data.success) {
+                    alert(`Live Zoom Sync Setup Required:\n\n${data.error || 'Configure Zoom OAuth credentials in your .env file.'}\n\nKey: ZOOM_ACCESS_TOKEN or ZOOM_CLIENT_ID`);
+                  } else {
+                    alert(`Successfully synced ${data.count} live Zoom meetings!`);
+                    queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
+                  }
+                } catch (err: any) {
+                  alert(`Zoom Sync Error: ${err.message}`);
+                }
+              }}
+            >
+              <Video size={15} /> Sync Live Zoom
+            </button>
+
+            <button className="btn btn-primary" onClick={() => setIsDeploying(true)}>
+              <Plus size={15} /> Connect Meeting Link
+            </button>
+          </div>
         }
       />
 
