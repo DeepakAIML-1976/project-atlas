@@ -149,28 +149,20 @@ async function meetingResponse(
 }
 
 router.get("/atlas/session", async (req, res): Promise<void> => {
-  const userId = await authenticatedUser(req, res);
-  if (!userId) return;
-  const memberships = await db
-    .select()
-    .from(atlasMembershipsTable)
-    .where(eq(atlasMembershipsTable.userId, userId))
-    .limit(1);
-  const membership = memberships[0];
-  const workspace = membership
-    ? (
-        await db
-          .select()
-          .from(atlasWorkspacesTable)
-          .where(eq(atlasWorkspacesTable.id, membership.workspaceId))
-          .limit(1)
-      )[0] ?? null
-    : null;
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+  const workspace = (
+    await db
+      .select()
+      .from(atlasWorkspacesTable)
+      .where(eq(atlasWorkspacesTable.id, ctx.workspaceId))
+      .limit(1)
+  )[0] ?? null;
   res.json(
     GetAtlasSessionResponse.parse({
-      userId,
+      userId: ctx.userId,
       workspace,
-      role: membership?.role ?? null,
+      role: ctx.role,
     }),
   );
 });
