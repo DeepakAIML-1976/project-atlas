@@ -49,6 +49,11 @@ if (process.env.CLERK_SECRET_KEY) {
 
 app.use("/api", router);
 
+// Explicit 404 JSON response for unhandled API routes
+app.use("/api/*", (_req, res) => {
+  res.status(404).json({ error: "API endpoint not found. Please ensure backend server is running the latest build." });
+});
+
 // Error logging middleware
 app.use((err: any, req: express.Request, res: express.Response, next: express.NextFunction) => {
   logger.error({ err, url: req.originalUrl || req.url, method: req.method }, "Express unhandled route error");

@@ -582,6 +582,10 @@ export function LiveMeetings() {
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ accessToken }),
                       });
+                      const contentType = res.headers.get('content-type') || '';
+                      if (!contentType.includes('application/json')) {
+                        throw new Error(`Server endpoint returned non-JSON (${res.status}). Please refresh or restart server.`);
+                      }
                       const data = await res.json();
                       setTokenVerification(data);
                     } catch (err: any) {
