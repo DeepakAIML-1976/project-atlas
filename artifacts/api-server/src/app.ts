@@ -50,8 +50,11 @@ if (process.env.CLERK_SECRET_KEY) {
 app.use("/api", router);
 
 // Explicit 404 JSON response for unhandled API routes
-app.use("/api/*", (_req, res) => {
-  res.status(404).json({ error: "API endpoint not found. Please ensure backend server is running the latest build." });
+app.use((req, res, next) => {
+  if (req.path.startsWith("/api") || req.originalUrl?.startsWith("/api")) {
+    return res.status(404).json({ error: "API endpoint not found. Please ensure backend server is running the latest build." });
+  }
+  next();
 });
 
 // Error logging middleware
