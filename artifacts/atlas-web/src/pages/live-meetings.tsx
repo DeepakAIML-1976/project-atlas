@@ -200,8 +200,8 @@ export function LiveMeetings() {
               <Video size={15} /> Sync Live Zoom
             </button>
 
-            <button className="btn btn-primary" onClick={() => setIsDeploying(true)}>
-              <Plus size={15} /> Connect Meeting Link
+            <button className="btn btn-primary" style={{ fontWeight: 600 }} onClick={() => setIsDeploying(true)}>
+              <Plus size={15} /> Connect MS Teams / Zoom Meeting Link
             </button>
           </div>
         }
@@ -221,8 +221,8 @@ export function LiveMeetings() {
               title="No Active Meeting Sessions"
               description="Deploy Deepak's AI Representative to a Teams or Zoom call to begin real-time meeting representation, note logging, and acoustic wake-up triggers."
               action={
-                <button className="btn btn-primary" onClick={() => setIsDeploying(true)}>
-                  <Plus size={14} /> Deploy Bot Now
+                <button className="btn btn-primary" style={{ fontWeight: 600 }} onClick={() => setIsDeploying(true)}>
+                  <Plus size={14} /> Connect MS Teams / Zoom Meeting Link
                 </button>
               }
             />
