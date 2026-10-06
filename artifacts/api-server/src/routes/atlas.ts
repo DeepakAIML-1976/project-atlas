@@ -1886,4 +1886,23 @@ router.get("/atlas/benchmark/results", async (req, res): Promise<void> => {
   res.json({ results });
 });
 
+// Admin Zero Mock Data Purge
+router.post("/atlas/admin/clear-mock-data", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+
+  await db.delete(atlasLiveMeetingsTable).where(eq(atlasLiveMeetingsTable.workspaceId, context.workspaceId));
+  await db.delete(atlasMeetingTriggersTable).where(eq(atlasMeetingTriggersTable.workspaceId, context.workspaceId));
+  await db.delete(atlasEmailDraftsTable).where(eq(atlasEmailDraftsTable.workspaceId, context.workspaceId));
+  await db.delete(atlasDecisionsTable).where(eq(atlasDecisionsTable.workspaceId, context.workspaceId));
+  await db.delete(atlasMeetingContributionsTable).where(eq(atlasMeetingContributionsTable.workspaceId, context.workspaceId));
+  await db.delete(atlasSourcesTable).where(eq(atlasSourcesTable.workspaceId, context.workspaceId));
+  await db.delete(atlasMeetingsTable).where(eq(atlasMeetingsTable.workspaceId, context.workspaceId));
+  await db.delete(atlasActionsTable).where(eq(atlasActionsTable.workspaceId, context.workspaceId));
+  await db.delete(atlasKnowledgeLinksTable).where(eq(atlasKnowledgeLinksTable.workspaceId, context.workspaceId));
+  await db.delete(atlasActivityTable).where(eq(atlasActivityTable.workspaceId, context.workspaceId));
+
+  res.json({ success: true, message: "All mock and test data cleared cleanly from workspace!" });
+});
+
 export default router;
