@@ -109,13 +109,16 @@ export function LiveMeetings() {
   });
 
   const linkAccountMutation = useMutation({
-    mutationFn: async (payload: { accountType: string; accountEmail: string; displayName?: string }) => {
+    mutationFn: async (payload: { accountType: string; accountEmail: string; displayName?: string; accessToken?: string; tenantId?: string; clientId?: string; clientSecret?: string }) => {
       const res = await fetch('/api/atlas/integrations/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error('Failed to link account');
+      if (!res.ok) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.error || 'Failed to link account');
+      }
       return res.json();
     },
     onSuccess: () => {
@@ -123,6 +126,7 @@ export function LiveMeetings() {
       setIsLinkingAccount(false);
       setAccountEmail('');
       setAccountDisplayName('');
+      syncAllMutation.mutate();
     },
   });
 
