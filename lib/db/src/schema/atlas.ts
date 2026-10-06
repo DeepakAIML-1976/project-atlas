@@ -395,6 +395,28 @@ export const atlasBenchmarkResultsTable = pgTable(
   (table) => [index("atlas_benchmark_workspace_idx").on(table.workspaceId)],
 );
 
+export const atlasLinkedAccountsTable = pgTable(
+  "atlas_linked_accounts",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => atlasWorkspacesTable.id, { onDelete: "cascade" }),
+    accountType: text("account_type").notNull(), // 'teams_personal', 'teams_company', 'outlook_personal', 'outlook_company', 'zoom'
+    accountEmail: text("account_email").notNull(),
+    displayName: text("display_name"),
+    accessToken: text("access_token"),
+    refreshToken: text("refresh_token"),
+    tenantId: text("tenant_id"),
+    clientId: text("client_id"),
+    clientSecret: text("client_secret"),
+    syncEnabled: boolean("sync_enabled").notNull().default(true),
+    lastSyncedAt: timestamp("last_synced_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [index("atlas_linked_accounts_workspace_idx").on(table.workspaceId)],
+);
+
 export const insertAtlasWorkspaceSchema = createInsertSchema(atlasWorkspacesTable).omit({ id: true, createdAt: true });
 export const insertAtlasMembershipSchema = createInsertSchema(atlasMembershipsTable).omit({ id: true, createdAt: true });
 export const insertAtlasTwinSchema = createInsertSchema(atlasTwinsTable).omit({ id: true, createdAt: true });
@@ -414,6 +436,7 @@ export const insertAtlasKnowledgeLinkSchema = createInsertSchema(atlasKnowledgeL
 export const insertAtlasActivitySchema = createInsertSchema(atlasActivityTable).omit({ id: true, createdAt: true });
 export const insertAtlasSocraticInterviewSchema = createInsertSchema(atlasSocraticInterviewsTable).omit({ id: true, createdAt: true });
 export const insertAtlasBenchmarkResultSchema = createInsertSchema(atlasBenchmarkResultsTable).omit({ id: true, createdAt: true });
+export const insertAtlasLinkedAccountSchema = createInsertSchema(atlasLinkedAccountsTable).omit({ id: true, createdAt: true });
 
 export type AtlasWorkspace = typeof atlasWorkspacesTable.$inferSelect;
 export type AtlasMembership = typeof atlasMembershipsTable.$inferSelect;
@@ -432,4 +455,5 @@ export type AtlasKnowledgeLink = typeof atlasKnowledgeLinksTable.$inferSelect;
 export type AtlasActivity = typeof atlasActivityTable.$inferSelect;
 export type AtlasSocraticInterview = typeof atlasSocraticInterviewsTable.$inferSelect;
 export type AtlasBenchmarkResult = typeof atlasBenchmarkResultsTable.$inferSelect;
+export type AtlasLinkedAccount = typeof atlasLinkedAccountsTable.$inferSelect;
 export type InsertAtlasWorkspace = z.infer<typeof insertAtlasWorkspaceSchema>;

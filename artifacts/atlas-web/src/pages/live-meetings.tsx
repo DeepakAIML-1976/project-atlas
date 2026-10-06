@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Video, Plus, AlertTriangle, Sparkles, Send, CheckCircle2, PhoneOff, ShieldCheck, MessageSquare, Bot, UserCheck } from 'lucide-react';
+import { Video, Plus, AlertTriangle, Sparkles, Send, CheckCircle2, PhoneOff, ShieldCheck, MessageSquare, Bot, UserCheck, RefreshCw, Link as LinkIcon, Trash2 } from 'lucide-react';
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } from '@/components/atlas-ui';
 import { Link } from 'wouter';
 
@@ -34,16 +34,32 @@ interface LiveMeetingDetail {
   notes?: string | null;
 }
 
+interface LinkedAccount {
+  id: string;
+  accountType: string;
+  accountEmail: string;
+  displayName?: string | null;
+  syncEnabled: boolean;
+  lastSyncedAt?: string | null;
+  createdAt: string;
+}
+
 export function LiveMeetings() {
   const queryClient = useQueryClient();
   const [selectedMeetingId, setSelectedMeetingId] = useState<string | null>(null);
   const [isDeploying, setIsDeploying] = useState(false);
+  const [isLinkingAccount, setIsLinkingAccount] = useState(false);
 
   // Form state
   const [meetingTitle, setMeetingTitle] = useState('');
   const [platform, setPlatform] = useState('teams');
   const [meetingUrl, setMeetingUrl] = useState('');
   const [botDisplayName, setBotDisplayName] = useState("Deepak's AI Representative (Atlas)");
+
+  // Account Linking Form state
+  const [accountType, setAccountType] = useState<'teams_personal' | 'teams_company'>('teams_company');
+  const [accountEmail, setAccountEmail] = useState('');
+  const [accountDisplayName, setAccountDisplayName] = useState('');
 
   // Live simulator transcript state
   const [speakerName, setSpeakerName] = useState('VP Projects');
@@ -59,6 +75,15 @@ export function LiveMeetings() {
     },
   });
 
+  const accountsQuery = useQuery<{ accounts: LinkedAccount[] }>({
+    queryKey: ['/api/atlas/integrations/accounts'],
+    queryFn: async () => {
+      const res = await fetch('/api/atlas/integrations/accounts');
+      if (!res.ok) throw new Error('Failed to fetch linked accounts');
+      return res.json();
+    },
+  });
+
   const detailQuery = useQuery<LiveMeetingDetail>({
     queryKey: ['/api/atlas/live-meetings', selectedMeetingId],
     queryFn: async () => {
@@ -68,6 +93,48 @@ export function LiveMeetings() {
       return res.json();
     },
     enabled: !!selectedMeetingId,
+  });
+
+  const syncAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/atlas/integrations/accounts/sync-all', { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to sync accounts');
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/integrations/accounts'] });
+      alert(`Calendar Sync Complete!\n\nProcessed ${data.totalAccounts || 0} linked MS Teams & Outlook account(s).`);
+    },
+  });
+
+  const linkAccountMutation = useMutation({
+    mutationFn: async (payload: { accountType: string; accountEmail: string; displayName?: string }) => {
+      const res = await fetch('/api/atlas/integrations/accounts', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) throw new Error('Failed to link account');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/integrations/accounts'] });
+      setIsLinkingAccount(false);
+      setAccountEmail('');
+      setAccountDisplayName('');
+    },
+  });
+
+  const unlinkAccountMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const res = await fetch(`/api/atlas/integrations/accounts/${id}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error('Failed to unlink account');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/integrations/accounts'] });
+    },
   });
 
   const deployMutation = useMutation({
@@ -131,6 +198,7 @@ export function LiveMeetings() {
   if (meetingsQuery.isError) return <ErrorState retry={() => meetingsQuery.refetch()} />;
 
   const meetings = meetingsQuery.data?.liveMeetings ?? [];
+  const linkedAccounts = accountsQuery.data?.accounts ?? [];
 
   const handleDeploySubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -139,6 +207,16 @@ export function LiveMeetings() {
       platform,
       meetingUrl: meetingUrl.trim() || undefined,
       botDisplayName: botDisplayName.trim(),
+    });
+  };
+
+  const handleLinkSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!accountEmail.trim()) return;
+    linkAccountMutation.mutate({
+      accountType,
+      accountEmail: accountEmail.trim(),
+      displayName: accountDisplayName.trim() || (accountType === 'teams_personal' ? "Deepak's Personal Teams" : "Deepak's Company Teams"),
     });
   };
 
@@ -157,47 +235,19 @@ export function LiveMeetings() {
         eyebrow="COGNITIVE SUITE / LIVE MEETING BOT & ACOUSTIC TRIGGER ENGINE"
         title="Live Meeting AI Representative"
         italic="always identified."
-        description="Deploys your digital twin as an explicitly labeled AI bot ('Deepak's AI Representative (Atlas)') to live Teams/Zoom meetings. Listens to live conversation, logs notes/actions, and triggers name wake-up alerts directly to your Executive Authorization Inbox."
+        description="Connect your 2 MS Teams accounts (Personal & Company) for daily calendar sync. Deploys your digital twin as an explicitly labeled AI bot ('Deepak's AI Representative (Atlas)') to live Teams meetings to log notes and route acoustic wake-up triggers."
         action={
           <div style={{ display: 'flex', gap: 10 }}>
             <button
               className="btn btn-outline"
-              onClick={async () => {
-                try {
-                  const res = await fetch('/api/atlas/integrations/teams/sync', { method: 'POST' });
-                  const data = await res.json();
-                  if (!res.ok || !data.success) {
-                    alert(`Live Teams Sync Setup Required:\n\n${data.error || 'Configure Microsoft Graph API credentials in your .env file.'}\n\nKey: MS_GRAPH_ACCESS_TOKEN or MS_GRAPH_CLIENT_ID`);
-                  } else {
-                    alert(`Successfully synced ${data.count} live MS Teams online meetings!`);
-                    queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
-                  }
-                } catch (err: any) {
-                  alert(`Teams Sync Error: ${err.message}`);
-                }
-              }}
+              disabled={syncAllMutation.isPending}
+              onClick={() => syncAllMutation.mutate()}
             >
-              <Video size={15} /> Sync Live MS Teams
+              <RefreshCw size={15} className={syncAllMutation.isPending ? 'spin' : ''} /> Sync Both Teams Accounts Now
             </button>
 
-            <button
-              className="btn btn-outline"
-              onClick={async () => {
-                try {
-                  const res = await fetch('/api/atlas/integrations/zoom/sync', { method: 'POST' });
-                  const data = await res.json();
-                  if (!res.ok || !data.success) {
-                    alert(`Live Zoom Sync Setup Required:\n\n${data.error || 'Configure Zoom OAuth credentials in your .env file.'}\n\nKey: ZOOM_ACCESS_TOKEN or ZOOM_CLIENT_ID`);
-                  } else {
-                    alert(`Successfully synced ${data.count} live Zoom meetings!`);
-                    queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
-                  }
-                } catch (err: any) {
-                  alert(`Zoom Sync Error: ${err.message}`);
-                }
-              }}
-            >
-              <Video size={15} /> Sync Live Zoom
+            <button className="btn btn-outline" onClick={() => setIsLinkingAccount(true)}>
+              <LinkIcon size={15} /> Link MS Teams Account
             </button>
 
             <button className="btn btn-primary" style={{ fontWeight: 600 }} onClick={() => setIsDeploying(true)}>
@@ -206,6 +256,58 @@ export function LiveMeetings() {
           </div>
         }
       />
+
+      {/* Linked MS Teams Accounts Panel */}
+      <div className="card card-pad" style={{ marginBottom: 24, background: '#faf8f5', borderColor: '#e2dcd2' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+          <div>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
+              Linked MS Teams Accounts ({linkedAccounts.length})
+            </h3>
+            <span style={{ fontSize: 12, color: '#666' }}>
+              Multi-account daily calendar sync active • Zero mock data policy enforced
+            </span>
+          </div>
+
+          <button className="btn btn-outline" style={{ fontSize: 12, padding: '4px 10px' }} onClick={() => setIsLinkingAccount(true)}>
+            <Plus size={13} /> Add Teams Account
+          </button>
+        </div>
+
+        {linkedAccounts.length === 0 ? (
+          <div style={{ padding: '12px 16px', background: '#fff', borderRadius: 6, border: '1px dashed #ccc', fontSize: 13, color: '#555' }}>
+            No MS Teams accounts linked yet. Click <strong>"Add Teams Account"</strong> above to link your Personal and Company Microsoft Teams accounts for automatic daily calendar synchronization.
+          </div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 12 }}>
+            {linkedAccounts.map((acc) => (
+              <div key={acc.id} style={{ background: '#fff', padding: '12px 14px', borderRadius: 6, border: '1px solid #e0d8cc', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+                    <span className={`badge ${acc.accountType.includes('company') ? 'blue' : 'green'}`}>
+                      {acc.accountType === 'teams_company' ? '🏢 Company Teams' : '👤 Personal Teams'}
+                    </span>
+                    <span className="badge">Active Sync</span>
+                  </div>
+                  <strong style={{ fontSize: 14, color: '#222' }}>{acc.accountEmail}</strong>
+                  <div className="muted tiny" style={{ marginTop: 4 }}>
+                    Last Synced: {acc.lastSyncedAt ? formatDate(acc.lastSyncedAt) : 'Just Now'}
+                  </div>
+                </div>
+
+                <button
+                  className="btn btn-outline"
+                  style={{ color: '#dc2626', borderColor: '#fca5a5', padding: '4px 8px' }}
+                  onClick={() => unlinkAccountMutation.mutate(acc.id)}
+                  title="Unlink Account"
+                >
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       <div className="grid-two">
         {/* Left Column: Meeting Sessions List */}
@@ -392,6 +494,66 @@ export function LiveMeetings() {
           )}
         </div>
       </div>
+
+      {/* Link MS Teams Account Modal */}
+      {isLinkingAccount && (
+        <Modal
+          title="Link Microsoft Teams Account"
+          subtitle="Link your Personal or Company MS Teams account for automatic daily meeting calendar sync."
+          onClose={() => setIsLinkingAccount(false)}
+        >
+          <form onSubmit={handleLinkSubmit}>
+            <div className="field">
+              <label className="label">Account Category</label>
+              <select
+                className="input"
+                value={accountType}
+                onChange={(e) => setAccountType(e.target.value as any)}
+              >
+                <option value="teams_company">🏢 Company Teams Account</option>
+                <option value="teams_personal">👤 Personal Teams Account</option>
+              </select>
+            </div>
+
+            <div className="field">
+              <label className="label" htmlFor="acc-email">Account Email Address</label>
+              <input
+                id="acc-email"
+                className="input"
+                type="email"
+                placeholder={accountType === 'teams_personal' ? 'deepak.personal@outlook.com' : 'deepak@company.com'}
+                value={accountEmail}
+                onChange={(e) => setAccountEmail(e.target.value)}
+                required
+              />
+            </div>
+
+            <div className="field">
+              <label className="label" htmlFor="acc-name">Display Label (Optional)</label>
+              <input
+                id="acc-name"
+                className="input"
+                placeholder={accountType === 'teams_personal' ? "Deepak's Personal MS Teams" : "Deepak's Company MS Teams"}
+                value={accountDisplayName}
+                onChange={(e) => setAccountDisplayName(e.target.value)}
+              />
+            </div>
+
+            <GoverningNote>
+              Daily Sync Policy: Atlas will query Microsoft Graph calendar events for this account daily and auto-populate your live meeting workspace.
+            </GoverningNote>
+
+            <div className="dialog-actions">
+              <button type="button" className="btn btn-outline" onClick={() => setIsLinkingAccount(false)}>
+                Cancel
+              </button>
+              <button className="btn btn-primary" disabled={linkAccountMutation.isPending}>
+                {linkAccountMutation.isPending ? 'Linking Account…' : 'Link Teams Account'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
 
       {/* Deploy Bot Modal */}
       {isDeploying && (
