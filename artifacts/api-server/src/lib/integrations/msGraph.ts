@@ -17,12 +17,44 @@ export function getMSGraphConfig(): MSGraphConfig {
   };
 }
 
+export async function resolveMSGraphToken(config: MSGraphConfig = getMSGraphConfig()): Promise<string | null> {
+  if (config.accessToken) {
+    return config.accessToken;
+  }
+
+  if (config.clientId && config.clientSecret) {
+    try {
+      const tenant = config.tenantId || "common";
+      const params = new URLSearchParams();
+      params.append("client_id", config.clientId);
+      params.append("client_secret", config.clientSecret);
+      params.append("grant_type", "client_credentials");
+      params.append("scope", "https://graph.microsoft.com/.default");
+
+      const tokenRes = await fetch(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: params.toString(),
+      });
+
+      if (tokenRes.ok) {
+        const tokenData = (await tokenRes.json()) as { access_token?: string };
+        return tokenData.access_token || null;
+      }
+    } catch (err) {
+      console.warn("Microsoft Graph OAuth token fetch failed:", err);
+    }
+  }
+
+  return null;
+}
+
 export async function fetchLiveOutlookEmails(
   workspaceId: string,
   userId: string,
   config: MSGraphConfig = getMSGraphConfig(),
 ) {
-  const token = config.accessToken;
+  const token = await resolveMSGraphToken(config);
   if (!token) {
     return {
       success: false,
@@ -86,7 +118,7 @@ export async function fetchLiveTeamsMeetings(
   userId: string,
   config: MSGraphConfig = getMSGraphConfig(),
 ) {
-  const token = config.accessToken;
+  const token = await resolveMSGraphToken(config);
   if (!token) {
     return {
       success: false,
