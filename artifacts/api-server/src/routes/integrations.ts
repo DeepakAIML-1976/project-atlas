@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { db, atlasLinkedAccountsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { workspaceContext } from "../lib/atlas";
-import { fetchLiveOutlookEmails, fetchLiveTeamsMeetings, getMSGraphConfig } from "../lib/integrations/msGraph";
+import { fetchLiveOutlookEmails, fetchLiveTeamsMeetings, getMSGraphConfig, verifyMSGraphToken } from "../lib/integrations/msGraph";
 import { fetchLiveZoomMeetings, getZoomConfig, handleZoomWebhookEvent } from "../lib/integrations/zoom";
 import { syncAllLinkedAccounts } from "../lib/integrations/teamsCalendarSync";
 
@@ -59,13 +59,19 @@ router.post("/atlas/integrations/accounts", async (req, res): Promise<void> => {
     return;
   }
 
+  // If an access token is provided, verify it first against Microsoft Graph API
+  let verification: { valid: boolean; email?: string; displayName?: string; jobTitle?: string; office?: string; error?: string } | null = null;
+  if (accessToken) {
+    verification = await verifyMSGraphToken(accessToken);
+  }
+
   const [account] = await db
     .insert(atlasLinkedAccountsTable)
     .values({
       workspaceId: ctx.workspaceId,
       accountType, // 'teams_personal', 'teams_company', 'outlook_personal', 'outlook_company', 'zoom'
-      accountEmail,
-      displayName: displayName || (accountType.includes("personal") ? "Deepak's Personal MS Teams" : "Deepak's Company MS Teams"),
+      accountEmail: verification?.email || accountEmail,
+      displayName: displayName || verification?.displayName || (accountType.includes("personal") ? "Deepak's Personal MS Teams" : "Deepak Paranjape (Kent PLC)"),
       accessToken: accessToken || null,
       refreshToken: refreshToken || null,
       tenantId: tenantId || null,
@@ -76,7 +82,37 @@ router.post("/atlas/integrations/accounts", async (req, res): Promise<void> => {
     })
     .returning();
 
-  res.status(201).json(account);
+  res.status(201).json({ account, verification });
+});
+
+// POST verify Microsoft Graph Token
+router.post("/atlas/integrations/accounts/verify-token", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const { accessToken } = req.body;
+  if (!accessToken) {
+    res.status(400).json({ valid: false, error: "Access token is required for verification." });
+    return;
+  }
+
+  const result = await verifyMSGraphToken(accessToken);
+  res.json(result);
+});
+
+// GET Azure OAuth Login Redirect URL
+router.get("/atlas/integrations/azure/login", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const clientId = process.env.MS_GRAPH_CLIENT_ID || process.env.AZURE_CLIENT_ID || "";
+  const tenant = process.env.MS_GRAPH_TENANT_ID || process.env.AZURE_TENANT_ID || "common";
+  const redirectUri = encodeURIComponent(`${req.protocol}://${req.get("host")}/api/atlas/integrations/azure/callback`);
+  const scope = encodeURIComponent("https://graph.microsoft.com/Calendars.Read https://graph.microsoft.com/OnlineMeetings.Read https://graph.microsoft.com/Mail.Read offline_access user.read");
+
+  const authUrl = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize?client_id=${clientId}&response_type=code&redirect_uri=${redirectUri}&response_mode=query&scope=${scope}`;
+
+  res.json({ authUrl, clientIdConfigured: Boolean(clientId) });
 });
 
 // DELETE unlink an account

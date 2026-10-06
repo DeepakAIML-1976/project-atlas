@@ -58,8 +58,13 @@ export function LiveMeetings() {
 
   // Account Linking Form state
   const [accountType, setAccountType] = useState<'teams_personal' | 'teams_company'>('teams_company');
-  const [accountEmail, setAccountEmail] = useState('');
-  const [accountDisplayName, setAccountDisplayName] = useState('');
+  const [accountEmail, setAccountEmail] = useState('Deepak.Paranjape@kentplc.com');
+  const [accountDisplayName, setAccountDisplayName] = useState('Deepak Paranjape (Kent PLC / Kentech Group DMCC)');
+  const [accessToken, setAccessToken] = useState('');
+  const [tenantId, setTenantId] = useState('');
+  const [clientId, setClientId] = useState('');
+  const [clientSecret, setClientSecret] = useState('');
+  const [tokenVerification, setTokenVerification] = useState<{ valid?: boolean; error?: string; email?: string } | null>(null);
 
   // Live simulator transcript state
   const [speakerName, setSpeakerName] = useState('VP Projects');
@@ -220,7 +225,11 @@ export function LiveMeetings() {
     linkAccountMutation.mutate({
       accountType,
       accountEmail: accountEmail.trim(),
-      displayName: accountDisplayName.trim() || (accountType === 'teams_personal' ? "Deepak's Personal Teams" : "Deepak's Company Teams"),
+      displayName: accountDisplayName.trim() || (accountType === 'teams_personal' ? "Deepak Paranjape (Personal)" : "Deepak Paranjape (Kent PLC / Kentech Group DMCC)"),
+      accessToken: accessToken.trim() || undefined,
+      tenantId: tenantId.trim() || undefined,
+      clientId: clientId.trim() || undefined,
+      clientSecret: clientSecret.trim() || undefined,
     });
   };
 
@@ -502,8 +511,8 @@ export function LiveMeetings() {
       {/* Link MS Teams Account Modal */}
       {isLinkingAccount && (
         <Modal
-          title="Link Microsoft Teams Account"
-          subtitle="Link your Personal or Company MS Teams account for automatic daily meeting calendar sync."
+          title="Connect Live Microsoft Teams Account"
+          subtitle="Connect Deepak.Paranjape@kentplc.com (Kentech Group DMCC / Kent PLC) or dpengineeringservices@gmail.com for authentic Graph API calendar streaming."
           onClose={() => setIsLinkingAccount(false)}
         >
           <form onSubmit={handleLinkSubmit}>
@@ -512,10 +521,20 @@ export function LiveMeetings() {
               <select
                 className="input"
                 value={accountType}
-                onChange={(e) => setAccountType(e.target.value as any)}
+                onChange={(e) => {
+                  const type = e.target.value as any;
+                  setAccountType(type);
+                  if (type === 'teams_company') {
+                    setAccountEmail('Deepak.Paranjape@kentplc.com');
+                    setAccountDisplayName('Deepak Paranjape (Kent PLC / Kentech Group DMCC)');
+                  } else {
+                    setAccountEmail('dpengineeringservices@gmail.com');
+                    setAccountDisplayName('Deepak Paranjape (Personal)');
+                  }
+                }}
               >
-                <option value="teams_company">🏢 Company Teams Account</option>
-                <option value="teams_personal">👤 Personal Teams Account</option>
+                <option value="teams_company">🏢 Kentech Group DMCC / Kent PLC (Deepak.Paranjape@kentplc.com)</option>
+                <option value="teams_personal">👤 Personal Teams Account (dpengineeringservices@gmail.com)</option>
               </select>
             </div>
 
@@ -525,7 +544,7 @@ export function LiveMeetings() {
                 id="acc-email"
                 className="input"
                 type="email"
-                placeholder={accountType === 'teams_personal' ? 'deepak.personal@outlook.com' : 'deepak@company.com'}
+                placeholder={accountType === 'teams_personal' ? 'dpengineeringservices@gmail.com' : 'Deepak.Paranjape@kentplc.com'}
                 value={accountEmail}
                 onChange={(e) => setAccountEmail(e.target.value)}
                 required
@@ -533,18 +552,84 @@ export function LiveMeetings() {
             </div>
 
             <div className="field">
-              <label className="label" htmlFor="acc-name">Display Label (Optional)</label>
+              <label className="label" htmlFor="acc-token">Microsoft Graph Access Token (Live Bearer Token)</label>
               <input
-                id="acc-name"
+                id="acc-token"
                 className="input"
-                placeholder={accountType === 'teams_personal' ? "Deepak's Personal MS Teams" : "Deepak's Company MS Teams"}
-                value={accountDisplayName}
-                onChange={(e) => setAccountDisplayName(e.target.value)}
+                type="password"
+                placeholder="Paste Bearer Access Token (e.g. eyJ0eXAi...)"
+                value={accessToken}
+                onChange={(e) => {
+                  setAccessToken(e.target.value);
+                  setTokenVerification(null);
+                }}
               />
+              <span style={{ fontSize: 11, color: '#666' }}>
+                Obtain via Azure CLI (<code>az account get-access-token --resource https://graph.microsoft.com</code>) or Graph Explorer.
+              </span>
+            </div>
+
+            {accessToken && (
+              <div style={{ marginBottom: 16 }}>
+                <button
+                  type="button"
+                  className="btn btn-outline"
+                  style={{ fontSize: 12, padding: '4px 10px' }}
+                  onClick={async () => {
+                    try {
+                      const res = await fetch('/api/atlas/integrations/accounts/verify-token', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ accessToken }),
+                      });
+                      const data = await res.json();
+                      setTokenVerification(data);
+                    } catch (err: any) {
+                      setTokenVerification({ valid: false, error: err.message });
+                    }
+                  }}
+                >
+                  <ShieldCheck size={14} /> Test Live MS Graph API Token
+                </button>
+
+                {tokenVerification && (
+                  <div style={{ marginTop: 8 }}>
+                    {tokenVerification.valid ? (
+                      <div className="notice" style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#166534', fontSize: 12 }}>
+                        <CheckCircle2 size={16} /> Verified Live MS Graph Connection for <strong>{tokenVerification.email}</strong>!
+                      </div>
+                    ) : (
+                      <div className="notice" style={{ background: '#fef2f2', borderColor: '#fecaca', color: '#991b1b', fontSize: 12 }}>
+                        <AlertTriangle size={16} /> Token Verification Failed: {tokenVerification.error}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div style={{ borderTop: '1px solid #e0d8cc', paddingTop: 12, marginTop: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: '#444', marginBottom: 8 }}>
+                Or Provide Azure AD App Credentials (Alternative for Kent PLC Tenant):
+              </div>
+              <div className="grid-two" style={{ gap: 8 }}>
+                <div className="field">
+                  <label className="label">Azure Tenant ID</label>
+                  <input className="input" placeholder="e.g. 72f988bf-..." value={tenantId} onChange={(e) => setTenantId(e.target.value)} />
+                </div>
+                <div className="field">
+                  <label className="label">Azure App Client ID</label>
+                  <input className="input" placeholder="e.g. 9b12a84c-..." value={clientId} onChange={(e) => setClientId(e.target.value)} />
+                </div>
+              </div>
+              <div className="field">
+                <label className="label">Azure Client Secret</label>
+                <input className="input" type="password" placeholder="Client secret value" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} />
+              </div>
             </div>
 
             <GoverningNote>
-              Daily Sync Policy: Atlas will query Microsoft Graph calendar events for this account daily and auto-populate your live meeting workspace.
+              Zero Mock Policy: Connecting your authentic token or credentials will stream live Microsoft Teams meetings and Outlook emails directly into your Cognitive Twin.
             </GoverningNote>
 
             <div className="dialog-actions">
@@ -552,7 +637,7 @@ export function LiveMeetings() {
                 Cancel
               </button>
               <button className="btn btn-primary" disabled={linkAccountMutation.isPending}>
-                {linkAccountMutation.isPending ? 'Linking Account…' : 'Link Teams Account'}
+                {linkAccountMutation.isPending ? 'Connecting Live Stream…' : 'Connect Live Account Stream'}
               </button>
             </div>
           </form>

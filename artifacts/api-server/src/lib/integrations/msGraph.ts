@@ -113,6 +113,40 @@ export async function fetchLiveOutlookEmails(
   }
 }
 
+export async function verifyMSGraphToken(token: string) {
+  try {
+    const response = await fetch("https://graph.microsoft.com/v1.0/me", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      return { valid: false, error: `Microsoft Graph API Authentication Error (${response.status}): ${errText}` };
+    }
+
+    const profile = (await response.json()) as {
+      userPrincipalName?: string;
+      displayName?: string;
+      mail?: string;
+      jobTitle?: string;
+      officeLocation?: string;
+    };
+
+    return {
+      valid: true,
+      email: profile.mail || profile.userPrincipalName || "Unknown",
+      displayName: profile.displayName || "Deepak Paranjape",
+      jobTitle: profile.jobTitle || "Piping Engineer",
+      office: profile.officeLocation || "Kent PLC / Kentech Group DMCC",
+    };
+  } catch (err: any) {
+    return { valid: false, error: err?.message || "Failed to communicate with Microsoft Graph API" };
+  }
+}
+
 export async function fetchLiveTeamsMeetings(
   workspaceId: string,
   userId: string,
@@ -128,41 +162,81 @@ export async function fetchLiveTeamsMeetings(
   }
 
   try {
-    const response = await fetch("https://graph.microsoft.com/v1.0/me/onlineMeetings", {
+    const syncedMeetings = [];
+
+    // 1. Fetch online meetings endpoint
+    const meetingsRes = await fetch("https://graph.microsoft.com/v1.0/me/onlineMeetings", {
       headers: {
         Authorization: `Bearer ${token}`,
         Accept: "application/json",
       },
     });
 
-    if (!response.ok) {
-      const errText = await response.text();
-      return { success: false, error: `Microsoft Graph Teams API error (${response.status}): ${errText}` };
+    if (meetingsRes.ok) {
+      const data = (await meetingsRes.json()) as {
+        value: Array<{
+          id: string;
+          subject: string;
+          joinWebUrl: string;
+          startDateTime: string;
+        }>;
+      };
+
+      for (const meeting of data.value ?? []) {
+        const [newMeeting] = await db
+          .insert(atlasLiveMeetingsTable)
+          .values({
+            workspaceId,
+            meetingTitle: meeting.subject || "Live MS Teams Meeting",
+            platform: "teams",
+            meetingUrl: meeting.joinWebUrl,
+            botStatus: "idle",
+            botDisplayName: "Deepak's AI Representative (Atlas)",
+          })
+          .returning();
+        syncedMeetings.push(newMeeting);
+      }
     }
 
-    const data = (await response.json()) as {
-      value: Array<{
-        id: string;
-        subject: string;
-        joinWebUrl: string;
-        startDateTime: string;
-      }>;
-    };
+    // 2. Fetch calendar events endpoint (for scheduled Teams meetings)
+    const calendarRes = await fetch("https://graph.microsoft.com/v1.0/me/calendar/events?$top=20&$orderby=start/dateTime desc", {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
 
-    const syncedMeetings = [];
-    for (const meeting of data.value ?? []) {
-      const [newMeeting] = await db
-        .insert(atlasLiveMeetingsTable)
-        .values({
-          workspaceId,
-          meetingTitle: meeting.subject || "Live MS Teams Meeting",
-          platform: "teams",
-          meetingUrl: meeting.joinWebUrl,
-          botStatus: "idle",
-          botDisplayName: "Deepak's AI Representative (Atlas)",
-        })
-        .returning();
-      syncedMeetings.push(newMeeting);
+    if (calendarRes.ok) {
+      const calData = (await calendarRes.json()) as {
+        value: Array<{
+          id: string;
+          subject: string;
+          isOnlineMeeting?: boolean;
+          onlineMeeting?: { joinUrl?: string };
+          webLink?: string;
+        }>;
+      };
+
+      for (const event of calData.value ?? []) {
+        const joinUrl = event.onlineMeeting?.joinUrl || event.webLink;
+        const [newMeeting] = await db
+          .insert(atlasLiveMeetingsTable)
+          .values({
+            workspaceId,
+            meetingTitle: event.subject || "Live MS Teams / Outlook Meeting",
+            platform: "teams",
+            meetingUrl: joinUrl,
+            botStatus: "idle",
+            botDisplayName: "Deepak's AI Representative (Atlas)",
+          })
+          .returning();
+        syncedMeetings.push(newMeeting);
+      }
+    }
+
+    if (!meetingsRes.ok && !calendarRes.ok) {
+      const errText = await calendarRes.text();
+      return { success: false, error: `Microsoft Graph API error: ${errText}` };
     }
 
     return {
