@@ -359,6 +359,42 @@ export const atlasActivityTable = pgTable(
   (table) => [index("atlas_activity_workspace_idx").on(table.workspaceId)],
 );
 
+export const atlasSocraticInterviewsTable = pgTable(
+  "atlas_socratic_interviews",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => atlasWorkspacesTable.id, { onDelete: "cascade" }),
+    interviewerQuestion: text("interviewer_question").notNull(),
+    smeAnswer: text("sme_answer"),
+    extractedKnowledgeUnitId: text("extracted_knowledge_unit_id"),
+    status: text("status").notNull().default("pending"),
+    createdAt: createdAt(),
+  },
+  (table) => [index("atlas_socratic_workspace_idx").on(table.workspaceId)],
+);
+
+export const atlasBenchmarkResultsTable = pgTable(
+  "atlas_benchmark_results",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => atlasWorkspacesTable.id, { onDelete: "cascade" }),
+    scenarioId: text("scenario_id").notNull(),
+    scenarioTitle: text("scenario_title").notNull(),
+    category: text("category").notNull(),
+    smeExpectedDecision: text("sme_expected_decision").notNull(),
+    twinDecision: text("twin_decision").notNull(),
+    alignmentScore: doublePrecision("alignment_score").notNull().default(0.0),
+    provenanceAccuracy: doublePrecision("provenance_accuracy").notNull().default(1.0),
+    reasoningSummary: text("reasoning_summary"),
+    createdAt: createdAt(),
+  },
+  (table) => [index("atlas_benchmark_workspace_idx").on(table.workspaceId)],
+);
+
 export const insertAtlasWorkspaceSchema = createInsertSchema(atlasWorkspacesTable).omit({ id: true, createdAt: true });
 export const insertAtlasMembershipSchema = createInsertSchema(atlasMembershipsTable).omit({ id: true, createdAt: true });
 export const insertAtlasTwinSchema = createInsertSchema(atlasTwinsTable).omit({ id: true, createdAt: true });
@@ -376,6 +412,8 @@ export const insertAtlasMeetingTriggerSchema = createInsertSchema(atlasMeetingTr
 export const insertAtlasDelegationRuleSchema = createInsertSchema(atlasDelegationRulesTable).omit({ id: true, createdAt: true });
 export const insertAtlasKnowledgeLinkSchema = createInsertSchema(atlasKnowledgeLinksTable).omit({ id: true, createdAt: true });
 export const insertAtlasActivitySchema = createInsertSchema(atlasActivityTable).omit({ id: true, createdAt: true });
+export const insertAtlasSocraticInterviewSchema = createInsertSchema(atlasSocraticInterviewsTable).omit({ id: true, createdAt: true });
+export const insertAtlasBenchmarkResultSchema = createInsertSchema(atlasBenchmarkResultsTable).omit({ id: true, createdAt: true });
 
 export type AtlasWorkspace = typeof atlasWorkspacesTable.$inferSelect;
 export type AtlasMembership = typeof atlasMembershipsTable.$inferSelect;
@@ -392,4 +430,6 @@ export type AtlasMeetingTrigger = typeof atlasMeetingTriggersTable.$inferSelect;
 export type AtlasDelegationRule = typeof atlasDelegationRulesTable.$inferSelect;
 export type AtlasKnowledgeLink = typeof atlasKnowledgeLinksTable.$inferSelect;
 export type AtlasActivity = typeof atlasActivityTable.$inferSelect;
+export type AtlasSocraticInterview = typeof atlasSocraticInterviewsTable.$inferSelect;
+export type AtlasBenchmarkResult = typeof atlasBenchmarkResultsTable.$inferSelect;
 export type InsertAtlasWorkspace = z.infer<typeof insertAtlasWorkspaceSchema>;

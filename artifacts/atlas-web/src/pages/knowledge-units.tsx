@@ -131,6 +131,31 @@ export function KnowledgeUnits() {
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
             <button
               className="btn btn-outline"
+              onClick={async () => {
+                try {
+                  const res = await fetch('/api/atlas/tacit-capture/question');
+                  if (!res.ok) throw new Error('Failed to fetch Socratic interview question');
+                  const interview = await res.json();
+                  const smeAnswer = prompt(`Socratic Tacit Capture Question:\n\n"${interview.interviewerQuestion}"\n\nPlease enter your experience/heuristic response:`);
+                  if (smeAnswer && smeAnswer.trim()) {
+                    const postRes = await fetch('/api/atlas/tacit-capture/answer', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ interviewId: interview.id, smeAnswer: smeAnswer.trim() }),
+                    });
+                    if (!postRes.ok) throw new Error('Failed to process Socratic response');
+                    alert('Successfully extracted and stored new Tacit SME Knowledge Unit!');
+                    queryClient.invalidateQueries({ queryKey: ['/api/atlas/knowledge-units'] });
+                  }
+                } catch (err: any) {
+                  alert(`Tacit Capture Error: ${err.message}`);
+                }
+              }}
+            >
+              <Brain size={15} color="#c65131" /> Socratic Tacit Interview
+            </button>
+            <button
+              className="btn btn-outline"
               disabled={seedMutation.isPending}
               onClick={() => seedMutation.mutate()}
               title="Bulk-import Deepak's 100 Tacit Piping Engineering Heuristics & Golden Rules"

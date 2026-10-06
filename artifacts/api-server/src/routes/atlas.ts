@@ -1803,4 +1803,87 @@ router.delete("/atlas/delegation-rules/:id", async (req, res): Promise<void> => 
   res.status(204).send();
 });
 
+// PCOS Tacit Knowledge Capture (Socratic Interviewer)
+router.get("/atlas/tacit-capture/question", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const { generateSocraticQuestion } = await import("../lib/atlasTacitEngine");
+  const interview = await generateSocraticQuestion(context.workspaceId);
+  res.json(interview);
+});
+
+router.post("/atlas/tacit-capture/answer", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const { interviewId, smeAnswer } = req.body;
+  if (!interviewId || !smeAnswer) {
+    res.status(400).json({ error: "interviewId and smeAnswer are required" });
+    return;
+  }
+  const { processSocraticAnswer } = await import("../lib/atlasTacitEngine");
+  const result = await processSocraticAnswer(context.workspaceId, interviewId, smeAnswer);
+  await activity(context.workspaceId, context.userId, "created", "knowledge_unit", result.knowledgeUnit.id);
+  res.json(result);
+});
+
+// PCOS Correction Learning Engine
+router.post("/atlas/corrections/learn", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const { originalContext, originalTwinResponse, smeCorrectionText } = req.body;
+  if (!originalContext || !originalTwinResponse || !smeCorrectionText) {
+    res.status(400).json({ error: "originalContext, originalTwinResponse, and smeCorrectionText are required" });
+    return;
+  }
+  const { learnFromCorrection } = await import("../lib/atlasTacitEngine");
+  const knowledgeUnit = await learnFromCorrection(
+    context.workspaceId,
+    originalContext,
+    originalTwinResponse,
+    smeCorrectionText,
+  );
+  await activity(context.workspaceId, context.userId, "learned_from_correction", "knowledge_unit", knowledgeUnit.id);
+  res.json({ success: true, knowledgeUnit });
+});
+
+// PCOS Decision Memory Trade-off Evaluator
+router.post("/atlas/decisions/evaluate", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const { projectContext, problemStatement, options } = req.body;
+  if (!projectContext || !problemStatement || !Array.isArray(options)) {
+    res.status(400).json({ error: "projectContext, problemStatement, and options array are required" });
+    return;
+  }
+  const { evaluateDecisionTradeOffs } = await import("../lib/atlasDecisionMemory");
+  const evaluation = await evaluateDecisionTradeOffs({
+    workspaceId: context.workspaceId,
+    projectContext,
+    problemStatement,
+    options,
+  });
+  res.json(evaluation);
+});
+
+// PCOS Benchmark Experiment Runner (50-Scenario Alignment)
+router.post("/atlas/benchmark/run", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const { runBenchmarkExperiment } = await import("../lib/atlasDecisionMemory");
+  const result = await runBenchmarkExperiment(context.workspaceId);
+  res.json(result);
+});
+
+router.get("/atlas/benchmark/results", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  const { atlasBenchmarkResultsTable } = await import("@workspace/db");
+  const results = await db
+    .select()
+    .from(atlasBenchmarkResultsTable)
+    .where(eq(atlasBenchmarkResultsTable.workspaceId, context.workspaceId))
+    .orderBy(desc(atlasBenchmarkResultsTable.createdAt));
+  res.json({ results });
+});
+
 export default router;
