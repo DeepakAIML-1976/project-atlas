@@ -1,0 +1,45 @@
+{
+  "$schema": "https://developer.microsoft.com/en-us/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "a6139213-1b01-4be2-a990-f6942830b6a6",
+  "packageName": "com.projectatlas.digitaltwin",
+  "developer": {
+    "name": "Deepak Paranjape",
+    "websiteUrl": "https://github.com/DeepakAIML-1976/project-atlas",
+    "privacyUrl": "https://github.com/DeepakAIML-1976/project-atlas/privacy",
+    "termsOfUseUrl": "https://github.com/DeepakAIML-1976/project-atlas/terms"
+  },
+  "icons": {
+    "outline": "outline.png",
+    "color": "color.png"
+  },
+  "name": {
+    "short": "Deepak's AI Twin (Atlas)",
+    "full": "Deepak Paranjape's Digital Twin & Cognitive Meeting Representative (Atlas)"
+  },
+  "description": {
+    "short": "Transparent AI Representative & Acoustic Trigger Engine for Piping Engineering",
+    "full": "Deploys Deepak Paranjape's Digital Twin to live Microsoft Teams meetings. Listens for acoustic triggers, logs engineering notes, and routes decisions to Executive Authorization Inbox."
+  },
+  "accentColor": "#C65131",
+  "bots": [
+    {
+      "botId": "YOUR_AZURE_BOT_APP_ID",
+      "scopes": ["team", "personal", "groupchat"],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "supportsCalling": true,
+      "supportsVideo": false
+    }
+  ],
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "validDomains": [
+    "*.kentplc.com",
+    "*.microsoft.com",
+    "localhost"
+  ]
+}

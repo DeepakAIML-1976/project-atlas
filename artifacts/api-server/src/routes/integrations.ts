@@ -5,6 +5,7 @@ import { workspaceContext } from "../lib/atlas";
 import { fetchLiveOutlookEmails, fetchLiveTeamsMeetings, getMSGraphConfig, verifyMSGraphToken } from "../lib/integrations/msGraph";
 import { fetchLiveZoomMeetings, getZoomConfig, handleZoomWebhookEvent } from "../lib/integrations/zoom";
 import { syncAllLinkedAccounts } from "../lib/integrations/teamsCalendarSync";
+import { joinTeamsLiveCallMediaStream } from "../lib/integrations/teamsCallingBot";
 
 const router: IRouter = Router();
 
@@ -165,6 +166,20 @@ router.post("/atlas/integrations/teams/sync", async (req, res): Promise<void> =>
     return;
   }
 
+  res.json(result);
+});
+
+router.post("/atlas/integrations/teams/calling/join", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const { meetingUrl, botDisplayName } = req.body;
+  if (!meetingUrl) {
+    res.status(400).json({ error: "meetingUrl is required to trigger Teams Graph Calling join." });
+    return;
+  }
+
+  const result = await joinTeamsLiveCallMediaStream(ctx.workspaceId, { meetingUrl, botDisplayName });
   res.json(result);
 });
 

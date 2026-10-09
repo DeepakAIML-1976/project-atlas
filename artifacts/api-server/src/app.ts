@@ -52,7 +52,8 @@ app.use("/api", router);
 // Explicit 404 JSON response for unhandled API routes
 app.use((req, res, next) => {
   if (req.path.startsWith("/api") || req.originalUrl?.startsWith("/api")) {
-    return res.status(404).json({ error: "API endpoint not found. Please ensure backend server is running the latest build." });
+    res.status(404).json({ error: "API endpoint not found. Please ensure backend server is running the latest build." });
+    return;
   }
   next();
 });
