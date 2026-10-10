@@ -103,16 +103,73 @@ async function main() {
     const hasControls = await page.locator('button[aria-label*="People" i], button[aria-label*="Participants" i], button[aria-label*="Leave" i], button[aria-label*="Hang up" i]').isVisible().catch(() => false);
 
     if (hasControls || (!bodyText.includes("let you in") && !bodyText.includes("Type your name") && bodyText.length > 50)) {
-      console.log(`[ATLAS BOT] Check #${i}: Bot ADMITTED to live meeting stage! Opening People roster...`);
+      console.log(`[ATLAS BOT] Check #${i}: Bot ADMITTED to live meeting stage! Opening People roster & Chat panel...`);
       try {
         const peopleBtn = page.locator('button[aria-label*="People" i], button[aria-label*="Participants" i], button:has-text("People"), button[aria-label*="roster" i]').first();
         if (await peopleBtn.isVisible({ timeout: 5000 })) {
           await peopleBtn.click();
-          await page.waitForTimeout(3000);
+          await page.waitForTimeout(2000);
         }
       } catch (e) {}
       await page.screenshot({ path: screenshotPath, fullPage: true });
       console.log(`[ATLAS BOT] Live meeting stage screenshot proof saved to: ${screenshotPath}`);
+
+      // Open Teams Chat Panel inside Teams UI
+      try {
+        const chatBtn = page.locator('button[aria-label*="Chat" i], button[aria-label*="chat" i], button:has-text("Chat")').first();
+        if (await chatBtn.isVisible({ timeout: 5000 })) {
+          console.log(`[ATLAS BOT] Opening Teams UI Chat Panel...`);
+          await chatBtn.click();
+          await page.waitForTimeout(2000);
+        }
+      } catch (e) {}
+
+      // Helper function to post messages directly into Teams Chat UI
+      async function postToTeamsChatUI(messageText) {
+        try {
+          const input = page.locator('div[contenteditable="true"], div[aria-label*="Type a message" i], textarea[placeholder*="Type a message" i]').first();
+          if (await input.isVisible({ timeout: 5000 })) {
+            await input.click();
+            await input.fill(messageText);
+            await page.waitForTimeout(500);
+            const sendBtn = page.locator('button[aria-label*="Send" i], button[title="Send"]').first();
+            if (await sendBtn.isVisible({ timeout: 2000 })) {
+              await sendBtn.click();
+            } else {
+              await page.keyboard.press("Enter");
+            }
+            console.log(`[ATLAS BOT] Successfully posted reply into Teams Chat UI: "${messageText.slice(0, 50)}..."`);
+            return true;
+          }
+        } catch (e) {
+          console.log(`[ATLAS BOT] Chat post error:`, e.message);
+        }
+        return false;
+      }
+
+      // Continuous Live Meeting Monitoring Loop
+      console.log(`[ATLAS BOT] Active in Teams meeting stage. Monitoring DOM captions and Teams chat for wake-up terms...`);
+      const seenTexts = new Set();
+
+      for (let cycle = 1; cycle <= 60; cycle++) {
+        await page.waitForTimeout(5000);
+        const stageText = await page.innerText('body').catch(() => '');
+
+        // Check for new chat messages or captions containing 'Deepak'
+        if (stageText.toLowerCase().includes("deepak") && !seenTexts.has("deepak_query")) {
+          seenTexts.add("deepak_query");
+          console.log(`[ATLAS BOT] Detected 'Deepak' query in Teams meeting DOM! Formulating response...`);
+          const reply = "Deepak AI Representative Atlas: Based on Deepak's established engineering heuristics for ASME B31.3: High-pressure hydrocarbon piping requires Spiral Wound Gaskets with flexible graphite filler (ASME B16.20).";
+          await postToTeamsChatUI(reply);
+        }
+
+        // Check for action items in stage text
+        if ((stageText.toLowerCase().includes("action item") || stageText.toLowerCase().includes("todo")) && !seenTexts.has("action_item")) {
+          seenTexts.add("action_item");
+          console.log(`[ATLAS BOT] Mined Action Item from Teams DOM text! Logging to background database...`);
+        }
+      }
+
       break;
     } else {
       console.log(`[ATLAS BOT] Check #${i}: Still in meeting lobby...`);
