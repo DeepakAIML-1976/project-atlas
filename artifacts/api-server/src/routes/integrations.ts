@@ -220,6 +220,33 @@ router.post("/atlas/integrations/teams/browser-bot/transcript", async (req, res)
   res.json(result);
 });
 
+router.post("/atlas/integrations/teams/chat/message", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  const workspaceId = ctx?.workspaceId || "default";
+  const { chatId, messageId, senderName, senderEmail, chatType, messageText, isMentioned, isReplyToDeepak } = req.body;
+
+  if (!messageText || !senderName) {
+    res.status(400).json({ error: "messageText and senderName are required fields." });
+    return;
+  }
+
+  const { processTeamsChatMessage } = await import("../lib/integrations/teamsChatBot");
+  const result = await processTeamsChatMessage({
+    workspaceId,
+    chatId: chatId || "teams_chat_001",
+    messageId: messageId || `msg_${Date.now()}`,
+    senderName,
+    senderEmail,
+    chatType: chatType || "group_chat",
+    messageText,
+    isMentioned: Boolean(isMentioned),
+    isReplyToDeepak: Boolean(isReplyToDeepak),
+  });
+
+  res.json(result);
+});
+
+
 
 router.post("/atlas/integrations/zoom/sync", async (req, res): Promise<void> => {
   const ctx = await workspaceContext(req, res);
