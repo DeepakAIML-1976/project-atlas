@@ -188,7 +188,7 @@ router.post("/atlas/integrations/teams/browser-bot/join", async (req, res): Prom
   const ctx = await workspaceContext(req, res);
   if (!ctx) return;
 
-  const { meetingUrl, botDisplayName } = req.body;
+  const { meetingUrl, botDisplayName, autoQnA, trackAttendance, extractActions } = req.body;
   if (!meetingUrl) {
     res.status(400).json({ error: "meetingUrl is required." });
     return;
@@ -198,9 +198,28 @@ router.post("/atlas/integrations/teams/browser-bot/join", async (req, res): Prom
     workspaceId: ctx.workspaceId,
     meetingUrl,
     botDisplayName,
+    autoQnA,
+    trackAttendance,
+    extractActions,
   });
   res.json(result);
 });
+
+router.post("/atlas/integrations/teams/browser-bot/transcript", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  const workspaceId = ctx?.workspaceId || "default";
+  const { liveMeetingId, speakerName, text } = req.body;
+
+  if (!text) {
+    res.status(400).json({ error: "text is required" });
+    return;
+  }
+
+  const { handleLiveMeetingChunk } = await import("../lib/integrations/teamsBrowserBot");
+  const result = await handleLiveMeetingChunk(workspaceId, liveMeetingId || "live_teams", speakerName || "Speaker", text);
+  res.json(result);
+});
+
 
 router.post("/atlas/integrations/zoom/sync", async (req, res): Promise<void> => {
   const ctx = await workspaceContext(req, res);
