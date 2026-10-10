@@ -3,6 +3,7 @@ import { logger } from "../logger";
 import { processLiveTranscriptChunk } from "../atlasMeetingBot";
 import { spawn } from "node:child_process";
 import path from "node:path";
+import fs from "node:fs";
 
 export interface TeamsBrowserBotConfig {
   workspaceId: string;
@@ -50,12 +51,23 @@ export async function deployTeamsWebBrowserBot(config: TeamsBrowserBotConfig) {
     logger.info({ meetingId: meeting.id, url: config.meetingUrl }, "Deploying Teams Web Browser Bot Automation Suite");
 
     // 2. Launch background Playwright automation worker script
-    const scriptPath = path.resolve(process.cwd(), "scratch/join_live_teams_meeting.js");
-    
+    let scriptPath = path.resolve(process.cwd(), "scratch/join_live_teams_meeting.js");
+    if (!fs.existsSync(scriptPath)) {
+      scriptPath = path.resolve(process.cwd(), "../../scratch/join_live_teams_meeting.js");
+    }
+    if (!fs.existsSync(scriptPath)) {
+      scriptPath = "C:\\Users\\dpeng\\Documents\\Digital-Twin-Suite\\scratch\\join_live_teams_meeting.js";
+    }
+
+    logger.info({ scriptPath, meetingUrl: config.meetingUrl }, "Resolved script path for Playwright worker");
+
+    const outLogPath = "C:\\Users\\dpeng\\.gemini\\antigravity\\brain\\a6139213-1b01-4be2-a990-f6942830b6a6\\teams_bot_spawn.log";
+    const outLogStream = fs.openSync(outLogPath, "a");
+
     // Spawn detached process for continuous meeting listening
     const child = spawn("node", [scriptPath], {
       detached: true,
-      stdio: "ignore",
+      stdio: ["ignore", outLogStream, outLogStream],
       env: {
         ...process.env,
         TARGET_MEETING_URL: config.meetingUrl,

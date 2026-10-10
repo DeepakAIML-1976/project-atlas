@@ -161,6 +161,19 @@ INSTRUCTIONS:
     });
   }
 
+  // Live Teams Message Delivery: Post the response directly into the Teams Chat / Channel / DM
+  let postedToTeams = false;
+  try {
+    const { sendMSGraphTeamsChatMessage } = await import("./msGraph");
+    const postRes = await sendMSGraphTeamsChatMessage(msg.chatId, replyText);
+    postedToTeams = postRes.success;
+    if (postedToTeams) {
+      logger.info({ chatId: msg.chatId, messageId: postRes.messageId }, "Posted AI representative response directly into Microsoft Teams chat");
+    }
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Direct Teams chat delivery via Graph API skipped; reply cached for DOM browser worker");
+  }
+
   return {
     handled: true,
     shouldReply: true,
@@ -168,5 +181,6 @@ INSTRUCTIONS:
     knowledgeBaseMatched,
     escalatedToInbox,
     alertId,
+    postedToTeams,
   };
 }

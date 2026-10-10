@@ -248,3 +248,40 @@ export async function fetchLiveTeamsMeetings(
     return { success: false, error: err?.message || "Failed to fetch Microsoft Teams meetings" };
   }
 }
+
+/**
+ * Post a message directly into a Microsoft Teams Chat or Group Thread via MS Graph API
+ */
+export async function sendMSGraphTeamsChatMessage(chatId: string, content: string, config: MSGraphConfig = getMSGraphConfig()) {
+  const token = await resolveMSGraphToken(config);
+  if (!token) {
+    return { success: false, error: "MS Graph Access Token not available for posting Teams chat message." };
+  }
+
+  try {
+    const res = await fetch(`https://graph.microsoft.com/v1.0/chats/${chatId}/messages`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        body: {
+          contentType: "text",
+          content,
+        },
+      }),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      return { success: false, error: `MS Graph Post Message Error (${res.status}): ${errText}` };
+    }
+
+    const data = await res.json();
+    return { success: true, messageId: data.id };
+  } catch (err: any) {
+    return { success: false, error: err?.message || "Failed to post message to Teams chat via MS Graph" };
+  }
+}
+
