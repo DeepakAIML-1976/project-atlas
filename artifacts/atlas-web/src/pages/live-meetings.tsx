@@ -54,7 +54,7 @@ export function LiveMeetings() {
   const [meetingTitle, setMeetingTitle] = useState('');
   const [platform, setPlatform] = useState('teams');
   const [meetingUrl, setMeetingUrl] = useState('');
-  const [botDisplayName, setBotDisplayName] = useState("Deepak's AI Representative (Atlas)");
+  const [botDisplayName, setBotDisplayName] = useState("Deepak AI Representative Atlas");
 
   // Account Linking Form state
   const [accountType, setAccountType] = useState<'teams_personal' | 'teams_company'>('teams_company');
@@ -162,6 +162,7 @@ export function LiveMeetings() {
       setSelectedMeetingId(data.id);
       setMeetingTitle('');
       setMeetingUrl('');
+      alert(`Bot Deployment Initiated!\n\n${data.botDisplayName} is actively navigating to your Teams meeting URL.\n\nOpen your Teams call window and click 'Admit' when you see the lobby notification.`);
     },
   });
 

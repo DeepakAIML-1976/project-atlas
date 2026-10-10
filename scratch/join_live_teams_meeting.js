@@ -2,8 +2,9 @@ import { chromium } from "playwright";
 import fs from "node:fs";
 import path from "node:path";
 
-const meetingUrl = "https://teams.live.com/meet/9316037901950?p=SSIGbvBMKPS7lxh5OZ";
-const botName = "Deepak AI Representative Atlas";
+const meetingUrl = process.env.TARGET_MEETING_URL || "https://teams.live.com/meet/9316037901950?p=SSIGbvBMKPS7lxh5OZ";
+const rawBotName = process.env.BOT_DISPLAY_NAME || "Deepak AI Representative Atlas";
+const botName = rawBotName.replace(/[()'"]/g, "").trim() || "Deepak AI Representative Atlas";
 const artifactDir = "C:\\Users\\dpeng\\.gemini\\antigravity\\brain\\a6139213-1b01-4be2-a990-f6942830b6a6";
 const screenshotPath = path.join(artifactDir, "live_teams_attendees_proof.png");
 

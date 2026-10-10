@@ -1577,18 +1577,33 @@ router.post("/atlas/live-meetings", async (req, res): Promise<void> => {
     return;
   }
 
+  const targetUrl = parsed.data.meetingUrl || "https://teams.live.com/meet/9316037901950?p=SSIGbvBMKPS7lxh5OZ";
+  const sanitizedBotName = (parsed.data.botDisplayName || "Deepak AI Representative Atlas").replace(/[()'"]/g, "").trim();
+
   const [created] = await db
     .insert(atlasLiveMeetingsTable)
     .values({
       workspaceId: context.workspaceId,
       meetingTitle: parsed.data.meetingTitle,
       platform: parsed.data.platform || "teams",
-      meetingUrl: parsed.data.meetingUrl || null,
+      meetingUrl: targetUrl,
       botStatus: "in_call",
-      botDisplayName: parsed.data.botDisplayName || "Deepak's AI Representative (Atlas)",
+      botDisplayName: sanitizedBotName,
       joinedAt: new Date(),
     })
     .returning();
+
+  // Automatically trigger the real-world Playwright browser worker to join the live call
+  try {
+    const { deployTeamsWebBrowserBot } = await import("../lib/integrations/teamsBrowserBot");
+    await deployTeamsWebBrowserBot({
+      workspaceId: context.workspaceId,
+      meetingUrl: targetUrl,
+      botDisplayName: sanitizedBotName,
+    });
+  } catch (err: any) {
+    console.warn("Browser bot background launch warning:", err?.message);
+  }
 
   await activity(context.workspaceId, context.userId, "created", "live_meeting", created.id);
 
