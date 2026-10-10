@@ -6,6 +6,7 @@ import { fetchLiveOutlookEmails, fetchLiveTeamsMeetings, getMSGraphConfig, verif
 import { fetchLiveZoomMeetings, getZoomConfig, handleZoomWebhookEvent } from "../lib/integrations/zoom";
 import { syncAllLinkedAccounts } from "../lib/integrations/teamsCalendarSync";
 import { joinTeamsLiveCallMediaStream } from "../lib/integrations/teamsCallingBot";
+import { deployTeamsWebBrowserBot } from "../lib/integrations/teamsBrowserBot";
 
 const router: IRouter = Router();
 
@@ -180,6 +181,24 @@ router.post("/atlas/integrations/teams/calling/join", async (req, res): Promise<
   }
 
   const result = await joinTeamsLiveCallMediaStream(ctx.workspaceId, { meetingUrl, botDisplayName });
+  res.json(result);
+});
+
+router.post("/atlas/integrations/teams/browser-bot/join", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const { meetingUrl, botDisplayName } = req.body;
+  if (!meetingUrl) {
+    res.status(400).json({ error: "meetingUrl is required." });
+    return;
+  }
+
+  const result = await deployTeamsWebBrowserBot({
+    workspaceId: ctx.workspaceId,
+    meetingUrl,
+    botDisplayName,
+  });
   res.json(result);
 });
 
