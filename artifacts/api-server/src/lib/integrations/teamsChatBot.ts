@@ -45,7 +45,23 @@ export interface TeamsMessageResponse {
  * - If Personal Message: Immediate corporate policy refusal.
  */
 export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promise<TeamsMessageResponse> {
-  const workspaceId = msg.workspaceId || "default";
+  let workspaceId = msg.workspaceId && msg.workspaceId !== "default" ? msg.workspaceId : "";
+  if (!workspaceId) {
+    try {
+      const { atlasWorkspacesTable } = await import("@workspace/db");
+      const allWs = await db.select().from(atlasWorkspacesTable);
+      if (msg.senderEmail) {
+        const emailLower = msg.senderEmail.toLowerCase();
+        const matched = allWs.find(w => emailLower.includes("sunil") ? w.name.toLowerCase().includes("sunil") : w.name.toLowerCase().includes("deepak"));
+        if (matched) workspaceId = matched.id;
+      }
+      if (!workspaceId && allWs.length > 0) {
+        const defaultWs = allWs.find(w => w.name.toLowerCase().includes("deepak")) || allWs[0];
+        workspaceId = defaultWs.id;
+      }
+    } catch (_) {}
+    if (!workspaceId) workspaceId = "1a39970a-abf0-48c3-8b89-08b669e80bbe";
+  }
 
   // Check if message requires bot attention
   const requiresAction = msg.chatType === "personal_dm" || msg.isMentioned || msg.isReplyToDeepak;
@@ -60,6 +76,7 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
   }
 
   logger.info({
+    workspaceId,
     senderName: msg.senderName,
     chatType: msg.chatType,
     isMentioned: msg.isMentioned,
@@ -67,11 +84,13 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
     text: msg.messageText.slice(0, 50),
   }, "Processing incoming Teams chat message");
 
-  // 1. IN-TEAMS APPROVAL COMMAND: Check if this is an approval command from Deepak
-  const isFromDeepak =
+  // 1. IN-TEAMS APPROVAL COMMAND: Check if this is an approval command from an authorized owner
+  const isFromOwner =
     msg.senderEmail?.toLowerCase().includes("deepak") ||
-    msg.senderName.toLowerCase().includes("deepak");
-  const isApprovalCommand = isFromDeepak && /^\s*(?:approve|authorize|yes|proceed)\b/i.test(msg.messageText.trim());
+    msg.senderName.toLowerCase().includes("deepak") ||
+    msg.senderEmail?.toLowerCase().includes("sunil") ||
+    msg.senderName.toLowerCase().includes("sunil");
+  const isApprovalCommand = isFromOwner && /^\s*(?:approve|authorize|yes|proceed)\b/i.test(msg.messageText.trim());
 
   if (isApprovalCommand) {
     const idMatch = msg.messageText.match(/approve\s+([a-zA-Z0-9\-]+)/i);
@@ -99,6 +118,16 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
         .orderBy(desc(atlasChatDraftsTable.createdAt))
         .limit(1);
       targetDraft = pending[0];
+
+      if (!targetDraft) {
+        const anyPending = await db
+          .select()
+          .from(atlasChatDraftsTable)
+          .where(eq(atlasChatDraftsTable.status, "pending_authorization"))
+          .orderBy(desc(atlasChatDraftsTable.createdAt))
+          .limit(1);
+        targetDraft = anyPending[0];
+      }
     }
 
     if (targetDraft) {

@@ -263,8 +263,8 @@ router.post("/atlas/integrations/teams/browser-bot/transcript", async (req, res)
 
 router.post("/atlas/integrations/teams/chat/message", async (req, res): Promise<void> => {
   const ctx = await workspaceContext(req, res);
-  const workspaceId = ctx?.workspaceId || "default";
-  const { chatId, messageId, senderName, senderEmail, chatType, messageText, isMentioned, isReplyToDeepak, threadHistory } = req.body;
+  const { workspaceId: bodyWsId, chatId, messageId, senderName, senderEmail, chatType, messageText, isMentioned, isReplyToDeepak, threadHistory } = req.body;
+  const workspaceId = bodyWsId || ctx?.workspaceId || "default";
 
   if (!messageText || !senderName) {
     res.status(400).json({ error: "messageText and senderName are required fields." });
@@ -327,4 +327,19 @@ router.post("/atlas/integrations/outlook/webhook", async (req, res): Promise<voi
   res.json({ status: "acknowledged" });
 });
 
+// GET universal sync status across all workspaces
+router.get("/atlas/integrations/sync/status", async (_req, res): Promise<void> => {
+  const { getSyncStatus } = await import("../lib/integrations/teamsSyncService.js");
+  const status = await getSyncStatus();
+  res.json(status);
+});
+
+// POST trigger universal multi-workspace sync cycle immediately
+router.post("/atlas/integrations/sync/trigger", async (_req, res): Promise<void> => {
+  const { runTeamsSyncCycle } = await import("../lib/integrations/teamsSyncService.js");
+  const status = await runTeamsSyncCycle();
+  res.json({ success: true, status });
+});
+
 export default router;
+

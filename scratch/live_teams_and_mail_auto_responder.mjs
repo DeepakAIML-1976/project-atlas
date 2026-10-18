@@ -138,17 +138,24 @@ async function pollTeamsChats() {
       let replyText = '';
       let alreadyPosted = false;
       try {
+        const targetWsId = sender.toLowerCase().includes('sunil')
+          ? 'eb62cc6b-8b2c-457f-b515-7baecaf11d4f'
+          : '1a39970a-abf0-48c3-8b89-08b669e80bbe';
+        const targetSenderEmail = msg.from?.user?.email || (sender.toLowerCase().includes('sunil') ? 'sunil.hiremath@kentplc.com' : 'deepak.paranjape@kentplc.com');
+
         const botRes = await fetch('http://localhost:5000/api/atlas/integrations/teams/chat/message', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            workspaceId: targetWsId,
             chatId: chat.id,
             messageId: msg.id,
             senderName: sender,
-            senderEmail: msg.from?.user?.email || 'deepak.paranjape@kentplc.com',
+            senderEmail: targetSenderEmail,
             chatType: chat.chatType === 'oneOnOne' ? 'personal_dm' : 'group_chat',
             messageText: cleanText,
             isMentioned: true,
+            isReplyToDeepak: true,
             threadHistory,
           }),
         });
@@ -211,12 +218,11 @@ async function pollTeamsChats() {
                 console.log(`>>> To refresh token in 1 click, visit: http://localhost:5000/api/atlas/auth/m365/login`);
                 console.log(`>>> Or configure TEAMS_WEBHOOK_URL in .env for permanent non-expiring posting.`);
               }
-            } else {
-              console.log(`[DELIVERY NOTICE] No active delegated token. Visit http://localhost:5000/api/atlas/auth/m365/login to authenticate.`);
             }
           }
         }
       } catch (e) {
+        seenChatMsgIds.delete(msg.id);
         console.warn('API server call fallback:', e.message);
       }
 

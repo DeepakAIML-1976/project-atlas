@@ -140,6 +140,16 @@ export async function ensurePCOSTablesExist() {
       ON CONFLICT ("email") DO NOTHING;
     `);
 
+    // Ensure linked accounts exist for active workspaces so multi-workspace polling is dynamic
+    await db.execute(sql`
+      INSERT INTO "atlas_linked_accounts" ("id", "workspace_id", "account_type", "account_email", "display_name", "tenant_id", "sync_enabled", "last_synced_at")
+      VALUES
+        ('acc_deepak_kent', '1a39970a-abf0-48c3-8b89-08b669e80bbe', 'teams_company', 'deepak.paranjape@kentplc.com', 'Deepak Paranjape (Kent PLC)', '60b4016c-366c-4f2f-af05-dc2fda09d07b', true, now()),
+        ('acc_deepak_personal', '1a39970a-abf0-48c3-8b89-08b669e80bbe', 'teams_personal', 'DeepakParanjape@DPEngineeringservices.onmicrosoft.com', 'Deepak Paranjape (Engineering)', '5af47cf9-2cb5-4b53-a5ec-f7fa67c69552', true, now()),
+        ('acc_sunil_kent', 'eb62cc6b-8b2c-457f-b515-7baecaf11d4f', 'teams_company', 'sunil.hiremath@kentplc.com', 'Sunil Hiremath (Kent PLC)', '60b4016c-366c-4f2f-af05-dc2fda09d07b', true, now())
+      ON CONFLICT ("id") DO NOTHING;
+    `);
+
     console.log("PCOS Database tables, atlas_users, and schema migrations ensured successfully!");
   } catch (err) {
     console.warn("Table auto-creation notice:", err);

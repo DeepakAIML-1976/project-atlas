@@ -18,6 +18,13 @@ app.listen(port, async (err) => {
   logger.info({ port }, "Server listening");
   await ensurePCOSTablesExist();
 
+  try {
+    const { startTeamsSyncDaemon } = await import("./lib/integrations/teamsSyncService.js");
+    startTeamsSyncDaemon(5000);
+  } catch (syncErr: any) {
+    logger.warn({ err: syncErr?.message }, "Teams universal sync daemon startup notice");
+  }
+
   if (process.env.AUTO_START_LIVE_RESPONDER === "true") {
     try {
       const { spawn } = await import("child_process");
