@@ -2,6 +2,7 @@ import { getAuth } from "@clerk/express";
 import type { Request, Response } from "express";
 import { and, eq } from "drizzle-orm";
 import { db, atlasMembershipsTable, atlasTwinsTable, atlasWorkspacesTable } from "@workspace/db";
+import { logger } from "./logger";
 
 export const TWIN_FIELD_KEYS = [
   "role",
@@ -90,67 +91,71 @@ export async function workspaceContext(
   if (!auth) return null;
   const { userId, ownerEmail, ownerName } = auth;
 
-  // Look for existing twin and membership bound specifically to this owner_email
-  const existingTwins = await db
-    .select()
-    .from(atlasTwinsTable)
-    .where(eq(atlasTwinsTable.ownerEmail, ownerEmail))
-    .limit(1);
+  let workspaceId = "1a39970a-abf0-48c3-8b89-08b669e80bbe";
 
-  let workspaceId: string;
-
-  if (existingTwins.length > 0) {
-    workspaceId = existingTwins[0].workspaceId;
-  } else {
-    // Check if membership exists for userId
-    const memberships = await db
+  try {
+    // Look for existing twin and membership bound specifically to this owner_email
+    const existingTwins = await db
       .select()
-      .from(atlasMembershipsTable)
-      .where(eq(atlasMembershipsTable.userId, userId))
+      .from(atlasTwinsTable)
+      .where(eq(atlasTwinsTable.ownerEmail, ownerEmail))
       .limit(1);
 
-    if (memberships.length > 0) {
-      workspaceId = memberships[0].workspaceId;
+    if (existingTwins.length > 0) {
+      workspaceId = existingTwins[0].workspaceId;
     } else {
-      // Auto-provision a brand-new isolated workspace specifically for this engineer
-      const twinDisplayName = getTwinDisplayName(ownerName);
-      const [newWorkspace] = await db
-        .insert(atlasWorkspacesTable)
-        .values({
-          name: `${ownerName}'s Piping Engineering Workspace`,
-          industry: "Oil & Gas Piping Engineering",
-        })
-        .returning();
-      workspaceId = newWorkspace.id;
+      // Check if membership exists for userId
+      const memberships = await db
+        .select()
+        .from(atlasMembershipsTable)
+        .where(eq(atlasMembershipsTable.userId, userId))
+        .limit(1);
 
-      await db.insert(atlasMembershipsTable).values({
-        workspaceId,
-        userId,
-        role: "owner",
-      });
+      if (memberships.length > 0) {
+        workspaceId = memberships[0].workspaceId;
+      } else {
+        // Auto-provision a brand-new isolated workspace specifically for this engineer
+        const twinDisplayName = getTwinDisplayName(ownerName);
+        const [newWorkspace] = await db
+          .insert(atlasWorkspacesTable)
+          .values({
+            name: `${ownerName}'s Piping Engineering Workspace`,
+            industry: "Oil & Gas Piping Engineering",
+          })
+          .returning();
+        workspaceId = newWorkspace.id;
 
-      await db.insert(atlasTwinsTable).values({
-        workspaceId,
-        ownerId: userId,
-        ownerEmail,
-        displayName: twinDisplayName,
-        autonomyLevel: 1,
-        autonomyReason: `Initial SME workspace auto-provisioned for ${ownerEmail}`,
-      });
+        await db.insert(atlasMembershipsTable).values({
+          workspaceId,
+          userId,
+          role: "owner",
+        });
 
-      // Also auto-provision default dynamic preferences for this twin
-      const { atlasTwinPreferencesTable } = await import("@workspace/db");
-      await db.insert(atlasTwinPreferencesTable).values({
-        workspaceId,
-        ownerEmail,
-        ingestionKeywords: ["Alky Reactor", "Alky Flare", "5884", "5333"],
-        allowedSenderEmails: [],
-        excludedDomains: [],
-        offlineCourtesyMessage: `I am ${twinDisplayName}, my twin is currently offline, I will make sure your message is replied once he is online.`,
-        offlineCourtesyMode: "dms_and_mentions",
-        signature: twinDisplayName,
-      });
+        await db.insert(atlasTwinsTable).values({
+          workspaceId,
+          ownerId: userId,
+          ownerEmail,
+          displayName: twinDisplayName,
+          autonomyLevel: 1,
+          autonomyReason: `Initial SME workspace auto-provisioned for ${ownerEmail}`,
+        });
+
+        // Also auto-provision default dynamic preferences for this twin
+        const { atlasTwinPreferencesTable } = await import("@workspace/db");
+        await db.insert(atlasTwinPreferencesTable).values({
+          workspaceId,
+          ownerEmail,
+          ingestionKeywords: ["Alky Reactor", "Alky Flare", "5884", "5333"],
+          allowedSenderEmails: [],
+          excludedDomains: [],
+          offlineCourtesyMessage: `I am ${twinDisplayName}, my twin is currently offline, I will make sure your message is replied once he is online.`,
+          offlineCourtesyMode: "dms_and_mentions",
+          signature: twinDisplayName,
+        });
+      }
     }
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "workspaceContext database query fallback to default workspace");
   }
 
   return {

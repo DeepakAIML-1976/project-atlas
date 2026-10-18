@@ -6,10 +6,13 @@ const { Pool } = pg;
 
 function parseConnectionStringToPgConfig(rawUrl: string): pg.PoolConfig {
   const cleaned = rawUrl.trim().replace(/^["']|["']$/g, "");
-  const isSupabaseOrCloud =
-    cleaned.includes("supabase") ||
-    cleaned.includes("sslmode=require") ||
-    cleaned.includes("pooler.supabase.com");
+  const isLocal =
+    cleaned.includes("localhost") ||
+    cleaned.includes("127.0.0.1") ||
+    cleaned.includes("@postgres:") ||
+    cleaned.includes("@host.docker.internal");
+  const isCloud = !isLocal;
+  const sslConfig = isCloud ? { rejectUnauthorized: false } : undefined;
 
   // First try regex parsing to handle unencoded special characters in password like '#', '?', '@', etc.
   const match = cleaned.match(/^(postgres(?:ql)?:\/\/)([^:]+):(.*)@([^:\/\?]+)(?::(\d+))?\/(.+)$/);
@@ -22,7 +25,10 @@ function parseConnectionStringToPgConfig(rawUrl: string): pg.PoolConfig {
       user: decodeURIComponent(user),
       password: decodeURIComponent(pass),
       database: dbName,
-      ssl: isSupabaseOrCloud ? { rejectUnauthorized: false } : undefined,
+      ssl: sslConfig,
+      connectionTimeoutMillis: 5000,
+      idleTimeoutMillis: 30000,
+      max: 10,
     };
   }
 
@@ -36,7 +42,10 @@ function parseConnectionStringToPgConfig(rawUrl: string): pg.PoolConfig {
         user: decodeURIComponent(parsed.username),
         password: decodeURIComponent(parsed.password),
         database: parsed.pathname ? parsed.pathname.replace(/^\//, "") : "postgres",
-        ssl: isSupabaseOrCloud ? { rejectUnauthorized: false } : undefined,
+        ssl: sslConfig,
+        connectionTimeoutMillis: 5000,
+        idleTimeoutMillis: 30000,
+        max: 10,
       };
     }
   } catch {
@@ -45,7 +54,10 @@ function parseConnectionStringToPgConfig(rawUrl: string): pg.PoolConfig {
 
   return {
     connectionString: cleaned,
-    ssl: isSupabaseOrCloud ? { rejectUnauthorized: false } : undefined,
+    ssl: sslConfig,
+    connectionTimeoutMillis: 5000,
+    idleTimeoutMillis: 30000,
+    max: 10,
   };
 }
 
@@ -59,6 +71,9 @@ if (!rawDbUrl.trim()) {
 const pgConfig = parseConnectionStringToPgConfig(rawDbUrl);
 
 export const pool = new Pool(pgConfig);
+pool.on("error", (err) => {
+  console.warn("PostgreSQL Pool background client warning:", err?.message || err);
+});
 export const db = drizzle(pool, { schema });
 
 export * from "./schema";
