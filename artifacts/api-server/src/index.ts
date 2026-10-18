@@ -9,13 +9,8 @@ if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
 }
 
-app.listen(port, async (err) => {
-  if (err) {
-    logger.error({ err }, "Error listening on port");
-    process.exit(1);
-  }
-
-  logger.info({ port }, "Server listening");
+const server = app.listen(port, "0.0.0.0", async () => {
+  logger.info({ port, host: "0.0.0.0" }, "Server listening");
   await ensurePCOSTablesExist();
 
   try {
@@ -47,4 +42,9 @@ app.listen(port, async (err) => {
       logger.warn({ err: e?.message }, "Failed to auto-start live responder daemon");
     }
   }
+});
+
+server.on("error", (err) => {
+  logger.error({ err }, "Error listening on port");
+  process.exit(1);
 });

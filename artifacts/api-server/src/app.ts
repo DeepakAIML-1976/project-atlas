@@ -180,33 +180,48 @@ app.use((err: any, req: express.Request, res: express.Response, next: express.Ne
 });
 
 // Serve built web frontend static files if available
-const webDistPath = path.resolve(process.cwd(), "artifacts/atlas-web/dist/public");
-const fallbackWebDistPath = path.resolve(process.cwd(), "../atlas-web/dist/public");
-const staticDir = fs.existsSync(webDistPath)
-  ? webDistPath
-  : fs.existsSync(fallbackWebDistPath)
-  ? fallbackWebDistPath
-  : null;
+const candidateStaticDirs = [
+  path.resolve(process.cwd(), "artifacts/atlas-web/dist/public"),
+  path.resolve(process.cwd(), "../atlas-web/dist/public"),
+  path.resolve(process.cwd(), "dist/public"),
+  path.resolve(process.cwd(), "../dist/public"),
+];
+
+try {
+  const currentDir = path.dirname(new URL(import.meta.url).pathname.replace(/^\/([a-zA-Z]:)/, "$1"));
+  candidateStaticDirs.push(
+    path.resolve(currentDir, "../../atlas-web/dist/public"),
+    path.resolve(currentDir, "../../../artifacts/atlas-web/dist/public"),
+    path.resolve(currentDir, "public")
+  );
+} catch (_) {}
+
+const staticDir = candidateStaticDirs.find((d) => fs.existsSync(d) && fs.existsSync(path.join(d, "index.html"))) || null;
 
 if (staticDir) {
   logger.info({ staticDir }, "Serving static web assets from");
   app.use(express.static(staticDir));
   app.use((req, res, next) => {
-    if (req.method === "GET" && !req.path.startsWith("/api")) {
+    if (req.method === "GET" && !req.path.startsWith("/api") && !req.path.startsWith("/auth")) {
       return res.sendFile(path.join(staticDir, "index.html"));
     }
     next();
   });
 } else {
-  app.get("/", (_req, res) => {
-    res.send(
+  logger.warn("Static assets directory not found; API routes active, fallback page serving at /");
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api") || req.path.startsWith("/auth")) {
+      return next();
+    }
+    res.status(200).send(
       `<!DOCTYPE html>
       <html>
         <head><title>Deepak's Digital Twin Suite API</title></head>
         <body style="font-family: sans-serif; padding: 40px; background: #faf9f6; color: #333;">
           <h2>Deepak's Digital Twin Suite API Server</h2>
           <p>The backend API server is running successfully at <code>/api</code>.</p>
-          <p>To view the full Web UI, please run the frontend dev server via <code>pnpm dev:web</code> or build static assets via <code>pnpm --filter @workspace/atlas-web run build</code>.</p>
+          <p>Frontend static assets were not located in any candidate directory.</p>
+          <p>Please ensure your Render build command includes: <code>pnpm --filter @workspace/atlas-web run build</code></p>
         </body>
       </html>`
     );
