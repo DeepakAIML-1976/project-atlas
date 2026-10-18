@@ -9,7 +9,7 @@ async function runFeatureTest() {
 
   let [ws] = await db.select().from(atlasWorkspacesTable);
   if (!ws) {
-    [ws] = await db.insert(atlasWorkspacesTable).values({ name: "Deepak Engineering Twin Workspace", ownerId: "user_deepak_sme" }).returning();
+    [ws] = await db.insert(atlasWorkspacesTable).values({ name: "Deepak Engineering Twin Workspace", industry: "Oil & Gas Engineering" }).returning();
   }
   const workspaceId = ws.id;
 

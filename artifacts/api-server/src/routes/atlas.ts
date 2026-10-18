@@ -95,6 +95,7 @@ import { processLiveTranscriptChunk } from "../lib/atlasMeetingBot";
 import { processIncomingEmail, regenerateEmailDraft } from "../lib/atlasEmailIngest.js";
 import { getLLMConfig } from "../lib/atlasLLM.js";
 import { TOP_100_HEURISTICS } from "../lib/top100HeuristicsData";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 const recordTypes = ["source", "meeting", "decision"] as const;
@@ -170,8 +171,9 @@ router.get("/atlas/session", async (req, res): Promise<void> => {
 });
 
 router.post("/atlas/workspaces", async (req, res): Promise<void> => {
-  const userId = await authenticatedUser(req, res);
-  if (!userId) return;
+  const auth = await authenticatedUser(req, res);
+  if (!auth) return;
+  const { userId } = auth;
   const parsed = CreateAtlasWorkspaceBody.safeParse(req.body);
   if (!parsed.success) {
     res.status(400).json({ error: parsed.error.message });

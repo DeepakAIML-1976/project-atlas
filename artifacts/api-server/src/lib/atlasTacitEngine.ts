@@ -146,6 +146,7 @@ export async function learnFromCorrection(
   let reasoning = `Extracted from Deepak's correction: "${smeCorrectionText}"`;
   let context = originalContext;
 
+  const llm = getLLMConfig();
   if (llm.isConfigured && llm.client) {
     try {
       const res = await llm.client.chat.completions.create({
