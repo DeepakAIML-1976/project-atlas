@@ -1,12 +1,14 @@
-﻿services:
+services:
   - type: web
     name: digital-twin-suite
     runtime: node
     plan: free
     region: oregon
-    buildCommand: corepack enable && pnpm install && pnpm run build
+    buildCommand: pnpm install && pnpm run build
     startCommand: node --enable-source-maps artifacts/api-server/dist/index.mjs
     envVars:
+      - key: NODE_VERSION
+        value: "22.14.0"
       - key: AUTO_START_LIVE_RESPONDER
         value: "true"
       - key: DATABASE_URL
