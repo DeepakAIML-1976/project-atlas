@@ -1,5 +1,5 @@
-import OpenAI from "openai";
-import { TWIN_FIELD_KEYS } from "./atlas";
+import { TWIN_FIELD_KEYS } from "./atlas.js";
+import { getLLMConfig } from "./atlasLLM.js";
 
 export interface ProfileSuggestion {
   key: typeof TWIN_FIELD_KEYS[number];
@@ -9,13 +9,12 @@ export interface ProfileSuggestion {
 }
 
 export async function suggestProfileFields(sourceText: string): Promise<ProfileSuggestion[]> {
-  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-  if (!baseURL || !apiKey) throw new Error("OpenAI integration is not configured");
-  const client = new OpenAI({ baseURL, apiKey });
+  const llm = getLLMConfig();
+  if (!llm.isConfigured || !llm.client) throw new Error("AI integration is not configured. Please set DEEPSEEK_API_KEY or OPENAI_API_KEY.");
+  const client = llm.client;
   const response = await client.chat.completions.create({
-    model: "gpt-5.4-mini",
-    max_completion_tokens: 8192,
+    model: llm.model,
+    max_tokens: 8192,
     response_format: { type: "json_object" },
     messages: [
       {
@@ -44,12 +43,16 @@ export async function suggestProfileFields(sourceText: string): Promise<ProfileS
       typeof key !== "string" || !TWIN_FIELD_KEYS.includes(key as typeof TWIN_FIELD_KEYS[number]) ||
       typeof value !== "string" || !value.trim() || value.length > 6000 ||
       typeof evidence !== "string" || !evidence.trim() || evidence.length > 1000 ||
-      !sourceText.includes(evidence) ||
-      typeof confidence !== "number" || !Number.isFinite(confidence) ||
-      confidence < 0 || confidence > 1 || seen.has(key)
+      typeof confidence !== "number" || !Number.isFinite(confidence) || confidence < 0 || confidence > 1 ||
+      !sourceText.includes(evidence) || seen.has(key)
     ) return [];
     seen.add(key);
-    return [{ key: key as ProfileSuggestion["key"], suggestedValue: value.trim(), evidence, confidence }];
+    return [{
+      key: key as typeof TWIN_FIELD_KEYS[number],
+      suggestedValue: value.trim(),
+      evidence: evidence.trim(),
+      confidence: Math.round(confidence * 100) / 100,
+    }];
   });
 }
 
@@ -69,15 +72,13 @@ export async function extractCorrectionKnowledgeUnit(
   correctionOrReason: string,
   contextInfo: string,
 ): Promise<ExtractedKnowledgeUnit> {
-  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  const llm = getLLMConfig();
 
-  if (baseURL && apiKey) {
+  if (llm.isConfigured && llm.client) {
     try {
-      const client = new OpenAI({ baseURL, apiKey });
-      const response = await client.chat.completions.create({
-        model: "gpt-5.4-mini",
-        max_completion_tokens: 4096,
+      const response = await llm.client.chat.completions.create({
+        model: llm.model,
+        max_tokens: 4096,
         response_format: { type: "json_object" },
         messages: [
           {

@@ -15,5 +15,19 @@ export interface AuthorizationInboxResponse {
   pendingMeetingContributions: AtlasMeetingContribution[];
   pendingDecisions: AtlasDecision[];
   pendingMeetingTriggers: AtlasMeetingTrigger[];
+  pendingChatDrafts?: Array<{
+    id: string;
+    chatId: string;
+    messageId: string;
+    senderName: string;
+    senderEmail?: string | null;
+    incomingMessage: string;
+    twinDraftResponse: string;
+    reasoning?: string | null;
+    confidence?: number | null;
+    status: string;
+    courtesyNoticeSent?: boolean | null;
+    createdAt: string | Date;
+  }>;
   totalPending: number;
 }

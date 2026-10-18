@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { atlasKnowledgeUnitsTable, atlasSocraticInterviewsTable, db } from "@workspace/db";
-import OpenAI from "openai";
+import { getLLMConfig } from "./atlasLLM.js";
 
 const SOCRATIC_QUESTIONS = [
   "Tell me about a piping layout issue that passed 3D model review but caused major constructability or maintenance issues at the site.",
@@ -56,14 +56,13 @@ export async function processSocraticAnswer(
   let context = "Oil & Gas EPC Project Execution";
   let exception = "";
 
-  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  const llm = getLLMConfig();
 
-  if (baseURL && apiKey) {
+  if (llm.isConfigured && llm.client) {
     try {
-      const client = new OpenAI({ baseURL, apiKey });
-      const res = await client.chat.completions.create({
-        model: "gpt-5.4-mini",
+      const res = await llm.client.chat.completions.create({
+        model: llm.model,
+        max_tokens: 2048,
         response_format: { type: "json_object" },
         messages: [
           {
@@ -147,14 +146,11 @@ export async function learnFromCorrection(
   let reasoning = `Extracted from Deepak's correction: "${smeCorrectionText}"`;
   let context = originalContext;
 
-  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
-
-  if (baseURL && apiKey) {
+  if (llm.isConfigured && llm.client) {
     try {
-      const client = new OpenAI({ baseURL, apiKey });
-      const res = await client.chat.completions.create({
-        model: "gpt-5.4-mini",
+      const res = await llm.client.chat.completions.create({
+        model: llm.model,
+        max_tokens: 2048,
         response_format: { type: "json_object" },
         messages: [
           {

@@ -1,6 +1,15 @@
-import { db, atlasKnowledgeUnitsTable, atlasMeetingTriggersTable, atlasActionsTable } from "@workspace/db";
+import {
+  db,
+  atlasKnowledgeUnitsTable,
+  atlasMeetingTriggersTable,
+  atlasLiveMeetingsTable,
+  atlasMeetingsTable,
+  atlasActionsTable,
+  atlasChatDraftsTable,
+  atlasTwinPreferencesTable,
+} from "@workspace/db";
 import { eq } from "drizzle-orm";
-import OpenAI from "openai";
+import { getLLMConfig } from "../atlasLLM.js";
 import { logger } from "../logger";
 
 export interface IncomingTeamsMessage {
@@ -13,6 +22,7 @@ export interface IncomingTeamsMessage {
   messageText: string;
   isMentioned: boolean;
   isReplyToDeepak: boolean;
+  threadHistory?: Array<{ sender: string; text: string }>;
 }
 
 export interface TeamsMessageResponse {
@@ -22,6 +32,7 @@ export interface TeamsMessageResponse {
   knowledgeBaseMatched: boolean;
   escalatedToInbox: boolean;
   alertId?: string;
+  postedToTeams?: boolean;
 }
 
 /**
@@ -33,9 +44,8 @@ export interface TeamsMessageResponse {
  * 3. 1-on-1 Personal Direct Messages (DMs)
  * 
  * Logic:
- * - Queries Digital Twin Knowledge Base (atlasKnowledgeUnitsTable).
- * - If answer exists or LLM can formulate evidence-grounded response -> Replies with "Deepak AI Representative Atlas: [Answer]".
- * - If no appropriate answer -> Replies "Deepak AI Representative Atlas: I have received your message and notified Deepak to get back to you..." and routes to Executive Authorization Inbox.
+ * - Cross-references across 4 Pillars (Email DB, Chat DB, Knowledge Bank, Heuristics/LLM).
+ * - Delivers grounded contextual replies with active signature.
  */
 export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promise<TeamsMessageResponse> {
   const workspaceId = msg.workspaceId || "default";
@@ -60,127 +70,112 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
     text: msg.messageText.slice(0, 50),
   }, "Processing incoming Teams chat message");
 
-  // 1. Fetch Deepak's Knowledge Base (Engineering Heuristics & Operations Context)
-  const knowledgeUnits = await db
-    .select()
-    .from(atlasKnowledgeUnitsTable)
-    .where(eq(atlasKnowledgeUnitsTable.workspaceId, workspaceId));
-
-  const lowerMsg = msg.messageText.toLowerCase();
-  
-  // Find matching heuristics by keyword overlap
-  const matchingUnits = knowledgeUnits.filter((ku) => {
-    const topicMatch = ku.topic?.toLowerCase().split(" ").some((w) => w.length > 3 && lowerMsg.includes(w));
-    const domainMatch = ku.domain?.toLowerCase().split(" ").some((w) => w.length > 3 && lowerMsg.includes(w));
-    return topicMatch || domainMatch;
+  // 1. Cross-reference across 4 Pillars (Email DB, Chat DB, Knowledge Bank, Heuristics)
+  const { verifyContextAndResolve } = await import("../contextVerificationEngine.js");
+  const verification = await verifyContextAndResolve({
+    workspaceId,
+    senderName: msg.senderName,
+    senderEmail: msg.senderEmail,
+    messageText: msg.messageText,
+    channel: msg.chatType === "personal_dm" ? "teams_dm" : "teams_chat",
+    chatId: msg.chatId,
+    threadHistory: msg.threadHistory || (msg as any).threadHistory || [],
   });
 
-  let replyText = "";
-  let knowledgeBaseMatched = matchingUnits.length > 0;
-  let escalatedToInbox = false;
-  let alertId: string | undefined = undefined;
+  const knowledgeBaseMatched = verification.category !== "personal";
 
-  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  // Load twin preferences for this workspace
+  let isOwnerOnline = true; // Default to online when owner is actively working
+  let offlineCourtesy = "I am Deepak's AI Representative, my twin is currently offline, I will make sure your message is replied once he is online.";
+  let twinSignature = "Deepak's AI Representative";
 
-  if (knowledgeBaseMatched || (baseURL && apiKey)) {
-    // Attempt LLM / Knowledgebase answer generation
-    if (baseURL && apiKey) {
-      try {
-        const client = new OpenAI({ baseURL, apiKey });
-        const heuristicsText = knowledgeUnits
-          .map((ku) => `[Domain: ${ku.domain}] Topic: ${ku.topic} -> ${ku.heuristic || ku.reasoning || ""}`)
-          .join("\n");
+  try {
+    const prefs = await db
+      .select()
+      .from(atlasTwinPreferencesTable)
+      .where(eq(atlasTwinPreferencesTable.workspaceId, workspaceId))
+      .limit(1);
+    if (prefs.length > 0) {
+      isOwnerOnline = Boolean(prefs[0].ownerIsOnline);
+      if (prefs[0].offlineCourtesyMessage) offlineCourtesy = prefs[0].offlineCourtesyMessage;
+      if (prefs[0].signature) twinSignature = prefs[0].signature;
+    }
+  } catch (_) {}
 
-        const res = await client.chat.completions.create({
-          model: "gpt-5.4-mini",
-          max_completion_tokens: 1024,
-          messages: [
-            {
-              role: "system",
-              content: `You are Deepak's AI Representative (Atlas) operating inside Microsoft Teams.
-You represent Deepak, a 35-year Senior Oil & Gas Piping Engineering SME at Kent PLC.
+  const isPersonal = verification.category === "personal";
+  let finalDispatchText = "";
+  let shouldReplyImmediate = false;
+  let draftId: string | undefined = undefined;
 
-Knowledge Base Heuristics:
-${heuristicsText || "No custom heuristics recorded yet; use ASME B31.3 / API 570 / ISO 13703 standard principles."}
+  if (isPersonal) {
+    // Policy refusal for personal messages is sent immediately
+    finalDispatchText = verification.replyText;
+    shouldReplyImmediate = true;
+  } else {
+    // Technical / Project / Operations inquiry:
+    // When a 4-pillar verified contextual answer is formulated, always dispatch it!
+    const hasContextualReply = Boolean(verification.replyText && verification.replyText.trim());
 
-INSTRUCTIONS:
-1. If you can answer the user's technical question based on Deepak's knowledgebase or standard engineering SME principles, formulate a clear, professional answer.
-2. Prepend your reply with "Deepak AI Representative Atlas: ".
-3. If the question is purely personal, confidential, or outside standard SME context, reply EXACTLY:
-"Deepak AI Representative Atlas: I have received your message and notified Deepak. He will review and reply to you directly."`,
-            },
-            {
-              role: "user",
-              content: `Incoming Teams message from ${msg.senderName} (${msg.chatType}): "${msg.messageText}"`,
-            },
-          ],
-        });
-
-        replyText = res.choices[0]?.message?.content?.trim() || "";
-      } catch (err: any) {
-        logger.warn({ err: err?.message }, "LLM Teams response generation fallback");
-      }
+    if (hasContextualReply) {
+      finalDispatchText = verification.replyText;
+      shouldReplyImmediate = true;
+    } else if (!isOwnerOnline) {
+      // Only fall back to offline courtesy if no contextual answer could be formulated and owner is offline
+      finalDispatchText = offlineCourtesy;
+      shouldReplyImmediate = true;
+    } else {
+      finalDispatchText = `${twinSignature}: I have logged your message and notified Deepak.`;
+      shouldReplyImmediate = true;
     }
 
-    if (!replyText && knowledgeBaseMatched) {
-      const topMatch = matchingUnits[0];
-      replyText = `Deepak AI Representative Atlas: Based on Deepak's established engineering heuristics for ${topMatch.topic}: ${topMatch.heuristic}`;
-    }
-  }
-
-  // If no appropriate answer was generated or if it indicates fallback
-  if (!replyText || replyText.includes("notified Deepak")) {
-    replyText = `Deepak AI Representative Atlas: I have received your message and notified Deepak. He will review and reply to you directly.`;
-    escalatedToInbox = true;
-
-    // Create alert in Executive Authorization Inbox
-    const [alert] = await db
-      .insert(atlasMeetingTriggersTable)
+    const [draft] = await db
+      .insert(atlasChatDraftsTable)
       .values({
         workspaceId,
-        liveMeetingId: msg.chatId,
-        speakerName: msg.senderName,
-        triggerPhrase: msg.messageText.slice(0, 100),
-        questionAsked: msg.messageText,
-        twinProposedResponse: replyText,
-        outputMode: "chat",
-        humanAlertStatus: "notified",
+        chatId: msg.chatId,
+        messageId: msg.messageId,
+        senderName: msg.senderName,
+        senderEmail: msg.senderEmail,
+        incomingMessage: msg.messageText,
+        twinDraftResponse: verification.replyText || finalDispatchText,
+        reasoning: verification.matchedContextSummary,
+        confidence: 0.95,
+        isLLMFallback: Boolean(verification.isLLMFallback),
+        ownerPresenceAtArrival: isOwnerOnline ? "online" : "offline",
+        courtesyNoticeSent: !hasContextualReply && !isOwnerOnline,
+        status: shouldReplyImmediate ? "sent" : "pending_authorization",
       })
       .returning();
+    draftId = draft.id;
 
-    alertId = alert.id;
-
-    // Log open action item
-    await db.insert(atlasActionsTable).values({
-      workspaceId,
-      meetingId: msg.chatId,
-      title: `Teams Chat Mention (${msg.senderName}): ${msg.messageText.slice(0, 150)}`,
-      owner: msg.senderName,
-      status: "open",
-    });
+    logger.info(
+      { draftId: draft.id, isOwnerOnline, shouldReplyImmediate, snippet: finalDispatchText.slice(0, 80) },
+      "Delivering 4-pillar verified AI representative response to Teams",
+    );
   }
 
-  // Live Teams Message Delivery: Post the response directly into the Teams Chat / Channel / DM
+  // Live Teams Message Delivery: only post if immediate reply is permitted
   let postedToTeams = false;
-  try {
-    const { sendMSGraphTeamsChatMessage } = await import("./msGraph");
-    const postRes = await sendMSGraphTeamsChatMessage(msg.chatId, replyText);
-    postedToTeams = postRes.success;
-    if (postedToTeams) {
-      logger.info({ chatId: msg.chatId, messageId: postRes.messageId }, "Posted AI representative response directly into Microsoft Teams chat");
+  if (shouldReplyImmediate && finalDispatchText) {
+    try {
+      const { sendMSGraphTeamsChatMessage } = await import("./msGraph");
+      const postRes = await sendMSGraphTeamsChatMessage(msg.chatId, finalDispatchText);
+      postedToTeams = postRes.success;
+      if (postedToTeams) {
+        logger.info({ chatId: msg.chatId, messageId: postRes.messageId }, "Posted immediate response into Microsoft Teams chat");
+      }
+    } catch (err: any) {
+      logger.warn({ err: err?.message }, "Direct Teams chat delivery via Graph API skipped; reply cached for DOM browser worker");
     }
-  } catch (err: any) {
-    logger.warn({ err: err?.message }, "Direct Teams chat delivery via Graph API skipped; reply cached for DOM browser worker");
   }
 
   return {
     handled: true,
-    shouldReply: true,
-    replyText,
+    shouldReply: shouldReplyImmediate,
+    replyText: finalDispatchText,
     knowledgeBaseMatched,
-    escalatedToInbox,
-    alertId,
+    escalatedToInbox: !isPersonal,
+    alertId: draftId,
     postedToTeams,
   };
 }

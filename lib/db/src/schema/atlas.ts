@@ -49,6 +49,7 @@ export const atlasTwinsTable = pgTable(
       .notNull()
       .references(() => atlasWorkspacesTable.id, { onDelete: "cascade" }),
     ownerId: text("owner_id").notNull(),
+    ownerEmail: text("owner_email"),
     displayName: text("display_name"),
     autonomyLevel: integer("autonomy_level").notNull().default(1),
     autonomyReason: text("autonomy_reason"),
@@ -220,6 +221,9 @@ export const atlasKnowledgeUnitsTable = pgTable(
     heuristic: text("heuristic"),
     exception: text("exception"),
     sourceRecordId: text("source_record_id"),
+    sourceDraftId: text("source_draft_id"),
+    isGlobal: boolean("is_global").notNull().default(false),
+    unitType: text("unit_type").notNull().default("heuristic"),
     confidence: doublePrecision("confidence").notNull().default(1.0),
     validationStatus: text("validation_status").notNull().default("validated"),
     createdAt: createdAt(),
@@ -227,6 +231,7 @@ export const atlasKnowledgeUnitsTable = pgTable(
   (table) => [
     index("atlas_knowledge_units_workspace_idx").on(table.workspaceId),
     index("atlas_knowledge_units_domain_idx").on(table.domain),
+    index("atlas_knowledge_units_global_idx").on(table.isGlobal),
   ],
 );
 
@@ -244,6 +249,7 @@ export const atlasEmailDraftsTable = pgTable(
     reasoning: text("reasoning"),
     confidence: doublePrecision("confidence"),
     status: text("status").notNull().default("pending_authorization"),
+    isLLMFallback: boolean("is_llm_fallback").default(false),
     authorizedAt: timestamp("authorized_at", { withTimezone: true }),
     createdAt: createdAt(),
   },
@@ -417,6 +423,79 @@ export const atlasLinkedAccountsTable = pgTable(
   (table) => [index("atlas_linked_accounts_workspace_idx").on(table.workspaceId)],
 );
 
+export const atlasTwinPreferencesTable = pgTable(
+  "atlas_twin_preferences",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => atlasWorkspacesTable.id, { onDelete: "cascade" }),
+    ownerEmail: text("owner_email").notNull(),
+    ingestionKeywords: jsonb("ingestion_keywords").$type<string[]>().notNull().default(["Alky Reactor", "Alky Flare", "5884", "5333"]),
+    allowedSenderEmails: jsonb("allowed_sender_emails").$type<string[]>().notNull().default([]),
+    excludedDomains: jsonb("excluded_domains").$type<string[]>().notNull().default([]),
+    offlineCourtesyMessage: text("offline_courtesy_message").notNull().default("I am Deepak's AI Representative, my twin is currently offline, I will make sure your message is replied once he is online."),
+    offlineCourtesyMode: text("offline_courtesy_mode").notNull().default("dms_and_mentions"),
+    signature: text("signature").notNull().default("Deepak's AI Representative"),
+    ownerIsOnline: boolean("owner_is_online").notNull().default(false),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    unique().on(table.workspaceId, table.ownerEmail),
+    index("atlas_twin_preferences_owner_idx").on(table.ownerEmail),
+  ],
+);
+
+export const atlasChatDraftsTable = pgTable(
+  "atlas_chat_drafts",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => atlasWorkspacesTable.id, { onDelete: "cascade" }),
+    chatId: text("chat_id").notNull(),
+    messageId: text("message_id").notNull(),
+    senderName: text("sender_name").notNull(),
+    senderEmail: text("sender_email"),
+    incomingMessage: text("incoming_message").notNull(),
+    twinDraftResponse: text("twin_draft_response").notNull(),
+    reasoning: text("reasoning"),
+    confidence: doublePrecision("confidence"),
+    isLLMFallback: boolean("is_llm_fallback").notNull().default(false),
+    ownerPresenceAtArrival: text("owner_presence_at_arrival").notNull().default("offline"),
+    courtesyNoticeSent: boolean("courtesy_notice_sent").notNull().default(false),
+    status: text("status").notNull().default("pending_authorization"),
+    authorizedAt: timestamp("authorized_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [
+    index("atlas_chat_drafts_workspace_idx").on(table.workspaceId),
+    index("atlas_chat_drafts_chat_idx").on(table.chatId),
+  ],
+);
+
+export const atlasUsersTable = pgTable(
+  "atlas_users",
+  {
+    id: id(),
+    email: text("email").notNull().unique(),
+    passwordHash: text("password_hash").notNull(),
+    displayName: text("display_name").notNull(),
+    role: text("role").notNull().default("engineer"),
+    encryptedEmailPassword: text("encrypted_email_password"),
+    consentGiven: boolean("consent_given").notNull().default(false),
+    consentGivenAt: timestamp("consent_given_at", { withTimezone: true }),
+    lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [index("atlas_users_email_idx").on(table.email)],
+);
+
+export const insertAtlasUserSchema = createInsertSchema(atlasUsersTable).omit({ id: true, createdAt: true });
+export type AtlasUser = typeof atlasUsersTable.$inferSelect;
+export type InsertAtlasUser = z.infer<typeof insertAtlasUserSchema>;
+
 export const insertAtlasWorkspaceSchema = createInsertSchema(atlasWorkspacesTable).omit({ id: true, createdAt: true });
 export const insertAtlasMembershipSchema = createInsertSchema(atlasMembershipsTable).omit({ id: true, createdAt: true });
 export const insertAtlasTwinSchema = createInsertSchema(atlasTwinsTable).omit({ id: true, createdAt: true });
@@ -456,4 +535,6 @@ export type AtlasActivity = typeof atlasActivityTable.$inferSelect;
 export type AtlasSocraticInterview = typeof atlasSocraticInterviewsTable.$inferSelect;
 export type AtlasBenchmarkResult = typeof atlasBenchmarkResultsTable.$inferSelect;
 export type AtlasLinkedAccount = typeof atlasLinkedAccountsTable.$inferSelect;
+export type AtlasTwinPreference = typeof atlasTwinPreferencesTable.$inferSelect;
+export type AtlasChatDraft = typeof atlasChatDraftsTable.$inferSelect;
 export type InsertAtlasWorkspace = z.infer<typeof insertAtlasWorkspaceSchema>;

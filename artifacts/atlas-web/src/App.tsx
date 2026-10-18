@@ -15,6 +15,7 @@ import { KnowledgeUnits } from '@/pages/knowledge-units';
 import { LiveMeetings } from '@/pages/live-meetings';
 import { EmailInbox } from '@/pages/email-inbox';
 import { DelegationRules } from '@/pages/delegation-rules';
+import { LoginPage } from '@/pages/login';
 
 const queryClient = new QueryClient({defaultOptions:{queries:{retry:1,refetchOnWindowFocus:false}}});
 const rawClerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? "";
@@ -57,6 +58,7 @@ function CacheResetOnUserChange(){
   return null;
 }
 function AuthPage({mode}:{mode:'in'|'up'}){
+  if (!hasClerkKey) return <LoginPage/>;
   return <div className="auth-layout" style={{minHeight:'100dvh'}}>
     <div className="auth-intro" style={{background:'#292538',color:'#f6f1e8',padding:'clamp(30px,6vw,85px)',display:'flex',flexDirection:'column',justifyContent:'space-between',minHeight:430}}>
       <Link href="/" style={{fontSize:23,fontWeight:700,letterSpacing:'-.07em'}} data-testid="link-auth-home">atlas<span style={{color:'#e6a381'}}>.</span></Link>
@@ -88,6 +90,7 @@ function Routed({children}:{children:ReactNode}){const [location]=useLocation();
 function NotFound(){return <div style={{minHeight:'100dvh',display:'grid',placeItems:'center',padding:25,textAlign:'center'}}><div><div className="eyebrow">404 / NOT FOUND</div><h1 className="page-title">This path goes <em>nowhere.</em></h1><p className="page-lede" style={{margin:'0 auto 24px'}}>There is no page at this address. Your workspace is still where you left it.</p><Link href="/overview" className="btn btn-primary" data-testid="link-not-found-overview">Go to workspace</Link></div></div>;}
 function Routes(){return <Routed><Switch>
   <Route path="/" component={Home}/>
+  <Route path="/login" component={LoginPage}/>
   <Route path="/sign-in/*?">{<AuthPage mode="in"/>}</Route>
   <Route path="/sign-up/*?">{<AuthPage mode="up"/>}</Route>
   <Route path="/overview">{<Protected><Overview/></Protected>}</Route>

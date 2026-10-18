@@ -44,6 +44,22 @@ export function setAuthTokenGetter(getter: AuthTokenGetter | null): void {
   _authTokenGetter = getter;
 }
 
+export function getActiveOwnerEmail(): string {
+  if (typeof window === "undefined") return "deepak.paranjape@kentplc.com";
+  try {
+    return localStorage.getItem("atlas_active_owner_email") || "deepak.paranjape@kentplc.com";
+  } catch {
+    return "deepak.paranjape@kentplc.com";
+  }
+}
+
+export function setActiveOwnerEmail(email: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem("atlas_active_owner_email", email.trim());
+  } catch (_) {}
+}
+
 function isRequest(input: RequestInfo | URL): input is Request {
   return typeof Request !== "undefined" && input instanceof Request;
 }
@@ -347,6 +363,20 @@ export async function customFetch<T = unknown>(
 
   if (responseType === "json" && !headers.has("accept")) {
     headers.set("accept", DEFAULT_JSON_ACCEPT);
+  }
+
+  // Multi-tenant isolation: attach active owner email from localStorage or default to Deepak
+  if (!headers.has("x-owner-email") && !headers.has("X-Owner-Email")) {
+    let activeEmail = "deepak.paranjape@kentplc.com";
+    if (typeof window !== "undefined") {
+      try {
+        const stored = localStorage.getItem("atlas_active_owner_email");
+        if (stored && stored.trim()) {
+          activeEmail = stored.trim();
+        }
+      } catch (_) {}
+    }
+    headers.set("X-Owner-Email", activeEmail);
   }
 
   // Attach bearer token when an auth getter is configured and no

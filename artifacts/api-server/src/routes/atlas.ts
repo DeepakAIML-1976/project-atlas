@@ -78,6 +78,7 @@ import {
   atlasKnowledgeUnitsTable,
   atlasLiveMeetingsTable,
   atlasDelegationRulesTable,
+  atlasChatDraftsTable,
   db,
 } from "@workspace/db";
 import {
@@ -91,7 +92,8 @@ import {
 } from "../lib/atlas";
 import { extractCorrectionKnowledgeUnit } from "../lib/atlasAI";
 import { processLiveTranscriptChunk } from "../lib/atlasMeetingBot";
-import { processIncomingEmail } from "../lib/atlasEmailIngest";
+import { processIncomingEmail, regenerateEmailDraft } from "../lib/atlasEmailIngest.js";
+import { getLLMConfig } from "../lib/atlasLLM.js";
 import { TOP_100_HEURISTICS } from "../lib/top100HeuristicsData";
 
 const router: IRouter = Router();
@@ -1139,11 +1141,23 @@ router.get("/atlas/authorization-inbox", async (req, res): Promise<void> => {
     )
     .orderBy(desc(atlasMeetingTriggersTable.createdAt));
 
+  const pendingChatDrafts = await db
+    .select()
+    .from(atlasChatDraftsTable)
+    .where(
+      and(
+        eq(atlasChatDraftsTable.workspaceId, context.workspaceId),
+        eq(atlasChatDraftsTable.status, "pending_authorization"),
+      ),
+    )
+    .orderBy(desc(atlasChatDraftsTable.createdAt));
+
   const totalPending =
     pendingEmails.length +
     pendingMeetingContributions.length +
     pendingDecisions.length +
-    pendingMeetingTriggers.length;
+    pendingMeetingTriggers.length +
+    pendingChatDrafts.length;
 
   res.json(
     GetAuthorizationInboxResponse.parse({
@@ -1151,6 +1165,7 @@ router.get("/atlas/authorization-inbox", async (req, res): Promise<void> => {
       pendingMeetingContributions,
       pendingDecisions,
       pendingMeetingTriggers,
+      pendingChatDrafts,
       totalPending,
     }),
   );
@@ -1186,12 +1201,13 @@ router.post("/atlas/authorization-inbox/authorize", async (req, res): Promise<vo
     }
 
     const finalStatus = action === "reject" ? "rejected" : "authorized";
+    const finalDraftResponse = editedContent ? editedContent : draft.twinDraftResponse;
     await db
       .update(atlasEmailDraftsTable)
       .set({
         status: finalStatus,
         authorizedAt: action === "reject" ? null : new Date(),
-        twinDraftResponse: editedContent ? editedContent : draft.twinDraftResponse,
+        twinDraftResponse: finalDraftResponse,
       })
       .where(eq(atlasEmailDraftsTable.id, itemId));
 
@@ -1211,6 +1227,24 @@ router.post("/atlas/authorization-inbox/authorize", async (req, res): Promise<vo
           sourceRecordId: draft.id,
           confidence: 1.0,
           validationStatus: "validated",
+        })
+        .returning();
+      learnedKnowledgeUnit = ku;
+    } else if (action === "authorize" && draft.isLLMFallback) {
+      // Closed-Loop Learning: record approved LLM fallback reply into Pillar 4 (Global Common Core)
+      const [ku] = await db
+        .insert(atlasKnowledgeUnitsTable)
+        .values({
+          workspaceId: context.workspaceId,
+          topic: `Subject: ${draft.subject.replace(/^(re:\s*|fw:\s*)/i, '').trim() || 'Piping Engineering Query'}`,
+          domain: "Oil & Gas Piping Engineering",
+          heuristic: finalDraftResponse.replace(/^.*?:/i, '').replace(/\[Draft generated via.*?\]/i, '').trim(),
+          reasoning: `Owner-approved engineering resolution generated via LLM First-Principles Fallback (Original email from ${draft.sender})`,
+          confidence: 1.0,
+          validationStatus: "validated",
+          isGlobal: true,
+          unitType: "llm_learned_heuristic",
+          sourceDraftId: draft.id,
         })
         .returning();
       learnedKnowledgeUnit = ku;
@@ -1350,6 +1384,85 @@ router.post("/atlas/authorization-inbox/authorize", async (req, res): Promise<vo
         .returning();
       learnedKnowledgeUnit = ku;
     }
+  } else if (itemType === "chat_draft") {
+    const [draft] = await db
+      .select()
+      .from(atlasChatDraftsTable)
+      .where(
+        and(
+          eq(atlasChatDraftsTable.id, itemId),
+          eq(atlasChatDraftsTable.workspaceId, context.workspaceId),
+        ),
+      );
+    if (!draft) {
+      res.status(404).json({ error: "Chat draft not found" });
+      return;
+    }
+
+    const finalStatus = action === "reject" ? "rejected" : "authorized";
+    const finalResponse = editedContent ? editedContent : draft.twinDraftResponse;
+
+    await db
+      .update(atlasChatDraftsTable)
+      .set({
+        status: finalStatus,
+        authorizedAt: action === "reject" ? null : new Date(),
+        twinDraftResponse: finalResponse,
+      })
+      .where(eq(atlasChatDraftsTable.id, itemId));
+
+    if (action !== "reject") {
+      try {
+        const { sendMSGraphTeamsChatMessage } = await import("../lib/integrations/msGraph");
+        const postRes = await sendMSGraphTeamsChatMessage(draft.chatId, finalResponse);
+        if (postRes.success) {
+          logger.info({ chatId: draft.chatId, messageId: postRes.messageId }, "Successfully dispatched authorized message to Microsoft Teams");
+        } else {
+          logger.warn({ chatId: draft.chatId, err: postRes.error }, "Teams message direct dispatch issue, queued for browser worker");
+        }
+      } catch (err: any) {
+        logger.warn({ err: err?.message }, "Failed to dispatch authorized message to Microsoft Teams");
+      }
+    }
+
+    if (action === "edit_authorize" || action === "reject") {
+      const correction = editedContent || rejectionReason || "Chat response rejected";
+      const extracted = await extractCorrectionKnowledgeUnit(
+        "meeting_trigger",
+        draft.twinDraftResponse,
+        correction,
+        `Speaker: ${draft.senderName || "Unknown"}, Question: ${draft.incomingMessage}`,
+      );
+      const [ku] = await db
+        .insert(atlasKnowledgeUnitsTable)
+        .values({
+          workspaceId: context.workspaceId,
+          ...extracted,
+          sourceRecordId: draft.id,
+          confidence: 1.0,
+          validationStatus: "validated",
+        })
+        .returning();
+      learnedKnowledgeUnit = ku;
+    } else if (action === "authorize" && draft.isLLMFallback) {
+      // Closed-Loop Learning: record approved LLM fallback reply into Pillar 4 (Global Common Core)
+      const [ku] = await db
+        .insert(atlasKnowledgeUnitsTable)
+        .values({
+          workspaceId: context.workspaceId,
+          topic: `Teams Chat: ${draft.incomingMessage.slice(0, 80)}`,
+          domain: "Oil & Gas Piping Engineering",
+          heuristic: finalResponse.replace(/^.*?:/i, '').replace(/\[Draft generated via.*?\]/i, '').trim(),
+          reasoning: `Owner-approved Teams response generated via LLM First-Principles Fallback (Question from ${draft.senderName}: ${draft.incomingMessage})`,
+          confidence: 1.0,
+          validationStatus: "validated",
+          isGlobal: true,
+          unitType: "llm_learned_heuristic",
+          sourceDraftId: draft.id,
+        })
+        .returning();
+      learnedKnowledgeUnit = ku;
+    }
   }
 
   await activity(context.workspaceId, context.userId, action, itemType, itemId);
@@ -1374,7 +1487,12 @@ router.get("/atlas/knowledge-units", async (req, res): Promise<void> => {
   const items = await db
     .select()
     .from(atlasKnowledgeUnitsTable)
-    .where(eq(atlasKnowledgeUnitsTable.workspaceId, context.workspaceId))
+    .where(
+      or(
+        eq(atlasKnowledgeUnitsTable.workspaceId, context.workspaceId),
+        eq(atlasKnowledgeUnitsTable.isGlobal, true),
+      ),
+    )
     .orderBy(desc(atlasKnowledgeUnitsTable.createdAt));
 
   let filtered = items;
@@ -1756,6 +1874,53 @@ router.post("/atlas/email-drafts/ingest", async (req, res): Promise<void> => {
   );
 
   res.status(201).json(draft);
+});
+
+router.get("/atlas/llm/status", async (req, res): Promise<void> => {
+  const config = getLLMConfig();
+  res.json({
+    isConfigured: config.isConfigured,
+    provider: config.provider,
+    model: config.model,
+  });
+});
+
+router.post("/atlas/email-drafts/redraft-all", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const pendingDrafts = await db
+    .select()
+    .from(atlasEmailDraftsTable)
+    .where(
+      and(
+        eq(atlasEmailDraftsTable.workspaceId, context.workspaceId),
+        eq(atlasEmailDraftsTable.status, "pending_authorization"),
+      ),
+    );
+
+  const updatedDrafts = [];
+  for (const draft of pendingDrafts) {
+    const updated = await regenerateEmailDraft(context.workspaceId, draft.id);
+    if (updated) updatedDrafts.push(updated);
+  }
+
+  res.json({ success: true, count: updatedDrafts.length, drafts: updatedDrafts });
+});
+
+router.post("/atlas/email-drafts/:id/redraft", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+  const updated = await regenerateEmailDraft(context.workspaceId, id);
+  if (!updated) {
+    res.status(404).json({ error: "Draft not found" });
+    return;
+  }
+  res.json(updated);
 });
 
 router.get("/atlas/delegation-rules", async (req, res): Promise<void> => {

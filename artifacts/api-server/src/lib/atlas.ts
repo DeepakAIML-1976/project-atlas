@@ -20,107 +20,145 @@ export type AtlasRole = "owner" | "admin" | "reviewer" | "viewer";
 
 export interface AtlasContext {
   userId: string;
+  ownerEmail: string;
+  ownerName: string;
   workspaceId: string;
   role: AtlasRole;
+}
+
+export function getTwinDisplayName(ownerNameOrEmail: string): string {
+  const clean = (ownerNameOrEmail || "").trim().replace(/'s\s+AI\s+Representative$/i, "").replace(/'s$/i, "");
+  let name = clean;
+  if (clean.includes("@")) {
+    const local = clean.split("@")[0];
+    const first = local.split(".")[0];
+    name = first.charAt(0).toUpperCase() + first.slice(1);
+  } else if (clean.includes(" ")) {
+    name = clean.split(" ")[0];
+  }
+  if (!name) name = "Deepak";
+  return `${name}'s AI Representative`;
 }
 
 export async function authenticatedUser(
   req: Request,
   res: Response,
-): Promise<string | null> {
+): Promise<{ userId: string; ownerEmail: string; ownerName: string } | null> {
   let userId: string | null = null;
+  let ownerEmail: string | null = null;
+
+  // Header override (useful for API clients & switching active logged-in engineer)
+  const headerEmail = (req.headers["x-owner-email"] as string)?.trim().toLowerCase();
+  if (headerEmail && headerEmail.includes("@")) {
+    ownerEmail = headerEmail;
+  }
+
   if (process.env.CLERK_SECRET_KEY) {
     try {
-      userId = getAuth(req).userId;
+      const auth = getAuth(req);
+      userId = auth.userId;
+      // In Clerk, user email can be forwarded or inspected
     } catch {
       // getAuth throws if request is not authenticated via Clerk
     }
   }
 
-  // Fallback for local SME development mode when Clerk key is not configured
+  // Fallback for local SME development mode
+  if (!ownerEmail) {
+    ownerEmail = (process.env.DEFAULT_OWNER_EMAIL || "deepak.paranjape@kentplc.com").trim().toLowerCase();
+  }
   if (!userId) {
-    userId = process.env.LOCAL_DEV_USER_ID ?? "user_deepak_sme";
+    userId = `user_${ownerEmail.replace(/[^a-zA-Z0-9]/g, "_")}`;
   }
 
-  if (!userId) {
-    res.status(401).json({ error: "Authentication required" });
-    return null;
+  let ownerName = "Deepak Paranjape";
+  if (ownerEmail.includes("sunil")) {
+    ownerName = "Sunil Hiremath";
+  } else if (!ownerEmail.includes("deepak")) {
+    const local = ownerEmail.split("@")[0].replace(/\./g, " ");
+    ownerName = local.replace(/\b\w/g, (c) => c.toUpperCase());
   }
-  return userId;
+
+  return { userId, ownerEmail, ownerName };
 }
 
 export async function workspaceContext(
   req: Request,
   res: Response,
 ): Promise<AtlasContext | null> {
-  const userId = await authenticatedUser(req, res);
-  if (!userId) return null;
+  const auth = await authenticatedUser(req, res);
+  if (!auth) return null;
+  const { userId, ownerEmail, ownerName } = auth;
 
-  const memberships = await db
+  // Look for existing twin and membership bound specifically to this owner_email
+  const existingTwins = await db
     .select()
-    .from(atlasMembershipsTable)
-    .where(eq(atlasMembershipsTable.userId, userId))
+    .from(atlasTwinsTable)
+    .where(eq(atlasTwinsTable.ownerEmail, ownerEmail))
     .limit(1);
-  let membership = memberships[0];
 
-  let validWorkspace = membership
-    ? (await db.select().from(atlasWorkspacesTable).where(eq(atlasWorkspacesTable.id, membership.workspaceId)).limit(1))[0]
-    : null;
+  let workspaceId: string;
 
-  if (!membership || !validWorkspace) {
-    // Auto-provision default SME workspace & membership if running locally or if missing
-    const workspaces = await db.select().from(atlasWorkspacesTable).limit(1);
-    let workspaceId: string;
-    if (workspaces.length > 0) {
-      workspaceId = workspaces[0].id;
+  if (existingTwins.length > 0) {
+    workspaceId = existingTwins[0].workspaceId;
+  } else {
+    // Check if membership exists for userId
+    const memberships = await db
+      .select()
+      .from(atlasMembershipsTable)
+      .where(eq(atlasMembershipsTable.userId, userId))
+      .limit(1);
+
+    if (memberships.length > 0) {
+      workspaceId = memberships[0].workspaceId;
     } else {
+      // Auto-provision a brand-new isolated workspace specifically for this engineer
+      const twinDisplayName = getTwinDisplayName(ownerName);
       const [newWorkspace] = await db
         .insert(atlasWorkspacesTable)
         .values({
-          name: "Deepak's Piping Engineering Workspace",
+          name: `${ownerName}'s Piping Engineering Workspace`,
           industry: "Oil & Gas Piping Engineering",
         })
         .returning();
       workspaceId = newWorkspace.id;
-    }
 
-    if (!membership) {
-      const [newMembership] = await db
-        .insert(atlasMembershipsTable)
-        .values({
-          workspaceId,
-          userId,
-          role: "owner",
-        })
-        .returning();
-      membership = newMembership;
-    } else {
-      await db
-        .update(atlasMembershipsTable)
-        .set({ workspaceId })
-        .where(eq(atlasMembershipsTable.id, membership.id));
-      membership.workspaceId = workspaceId;
-    }
+      await db.insert(atlasMembershipsTable).values({
+        workspaceId,
+        userId,
+        role: "owner",
+      });
 
-    const twins = await db
-      .select()
-      .from(atlasTwinsTable)
-      .where(and(eq(atlasTwinsTable.workspaceId, workspaceId), eq(atlasTwinsTable.ownerId, userId)));
-    if (twins.length === 0) {
       await db.insert(atlasTwinsTable).values({
         workspaceId,
         ownerId: userId,
-        displayName: "Deepak's AI Representative (Atlas)",
+        ownerEmail,
+        displayName: twinDisplayName,
         autonomyLevel: 1,
-        autonomyReason: "Initial SME workspace creation",
+        autonomyReason: `Initial SME workspace auto-provisioned for ${ownerEmail}`,
+      });
+
+      // Also auto-provision default dynamic preferences for this twin
+      const { atlasTwinPreferencesTable } = await import("@workspace/db");
+      await db.insert(atlasTwinPreferencesTable).values({
+        workspaceId,
+        ownerEmail,
+        ingestionKeywords: ["Alky Reactor", "Alky Flare", "5884", "5333"],
+        allowedSenderEmails: [],
+        excludedDomains: [],
+        offlineCourtesyMessage: `I am ${twinDisplayName}, my twin is currently offline, I will make sure your message is replied once he is online.`,
+        offlineCourtesyMode: "dms_and_mentions",
+        signature: twinDisplayName,
       });
     }
   }
 
   return {
     userId,
-    workspaceId: membership.workspaceId,
-    role: (membership.role as AtlasRole) || "owner",
+    ownerEmail,
+    ownerName,
+    workspaceId,
+    role: "owner",
   };
 }
 
@@ -134,16 +172,41 @@ export function requireSharedWrite(
 }
 
 export async function userTwin(context: AtlasContext) {
-  const rows = await db
+  // 1. First look up by workspaceId and ownerEmail
+  let rows = await db
     .select()
     .from(atlasTwinsTable)
     .where(
       and(
         eq(atlasTwinsTable.workspaceId, context.workspaceId),
-        eq(atlasTwinsTable.ownerId, context.userId),
+        eq(atlasTwinsTable.ownerEmail, context.ownerEmail),
       ),
     )
     .limit(1);
+
+  // 2. Fall back to workspaceId and ownerId
+  if (rows.length === 0) {
+    rows = await db
+      .select()
+      .from(atlasTwinsTable)
+      .where(
+        and(
+          eq(atlasTwinsTable.workspaceId, context.workspaceId),
+          eq(atlasTwinsTable.ownerId, context.userId),
+        ),
+      )
+      .limit(1);
+  }
+
+  // 3. Fall back to any twin in this isolated workspace
+  if (rows.length === 0) {
+    rows = await db
+      .select()
+      .from(atlasTwinsTable)
+      .where(eq(atlasTwinsTable.workspaceId, context.workspaceId))
+      .limit(1);
+  }
+
   return rows[0] ?? null;
 }
 

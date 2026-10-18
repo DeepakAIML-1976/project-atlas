@@ -50,11 +50,27 @@ interface MeetingTrigger {
   createdAt: string;
 }
 
+interface ChatDraft {
+  id: string;
+  chatId: string;
+  messageId: string;
+  senderName: string;
+  senderEmail?: string | null;
+  incomingMessage: string;
+  twinDraftResponse: string;
+  reasoning?: string | null;
+  confidence?: number | null;
+  status: string;
+  courtesyNoticeSent?: boolean | null;
+  createdAt: string;
+}
+
 interface AuthorizationInboxData {
   pendingEmails: EmailDraft[];
   pendingMeetingContributions: MeetingContribution[];
   pendingDecisions: Decision[];
   pendingMeetingTriggers: MeetingTrigger[];
+  pendingChatDrafts?: ChatDraft[];
   totalPending: number;
 }
 
@@ -66,9 +82,37 @@ interface LearnedKnowledgeUnit {
   reasoning?: string | null;
 }
 
+function cleanDisplayBody(text?: string | null): string {
+  if (!text) return '';
+  if (/<[a-z][\s\S]*>/i.test(text)) {
+    return text
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<head[\s\S]*?<\/head>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<\/(p|div|tr|li|h[1-6]|br)>/gi, '\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+  return text;
+}
+
+import { getActiveOwnerEmail } from '@workspace/api-client-react';
+
 export function AuthorizationInbox() {
   const queryClient = useQueryClient();
-  const [activeTab, setActiveTab] = useState<'all' | 'emails' | 'contributions' | 'decisions' | 'triggers'>('all');
+  const activeOwner = getActiveOwnerEmail();
+  const [activeTab, setActiveTab] = useState<'all' | 'emails' | 'chats' | 'contributions' | 'decisions' | 'triggers'>('all');
   const [editingItem, setEditingItem] = useState<{ itemType: string; itemId: string; originalContent: string; contextTitle: string } | null>(null);
   const [editText, setEditText] = useState('');
   const [rejectingItem, setRejectingItem] = useState<{ itemType: string; itemId: string; contextTitle: string } | null>(null);
@@ -76,9 +120,11 @@ export function AuthorizationInbox() {
   const [learnedNotification, setLearnedNotification] = useState<LearnedKnowledgeUnit | null>(null);
 
   const inboxQuery = useQuery<AuthorizationInboxData>({
-    queryKey: ['/api/atlas/authorization-inbox'],
+    queryKey: ['/api/atlas/authorization-inbox', activeOwner],
     queryFn: async () => {
-      const res = await fetch('/api/atlas/authorization-inbox');
+      const res = await fetch('/api/atlas/authorization-inbox', {
+        headers: { 'X-Owner-Email': activeOwner },
+      });
       if (!res.ok) throw new Error('Failed to fetch authorization inbox');
       return res.json();
     },
@@ -174,12 +220,35 @@ export function AuthorizationInbox() {
         </div>
       )}
 
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: '#f8fafc', border: '1px solid #e2e8f0', borderRadius: 8, padding: '12px 18px', marginBottom: 20 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: '#22c55e' }}></span>
+          <span style={{ fontSize: 13, fontWeight: 500, color: '#334155' }}>
+            Microsoft Teams & Outlook Engine: Active (Deepak's AI Representative)
+          </span>
+        </div>
+        <a
+          href="/api/atlas/auth/m365/login"
+          className="btn btn-outline"
+          style={{ fontSize: 12, padding: '6px 12px', background: '#ffffff', textDecoration: 'none' }}
+          title="Refresh delegated permissions with Microsoft 365"
+        >
+          Re-authenticate M365 (1-Click)
+        </a>
+      </div>
+
       <div style={{ display: 'flex', gap: 10, marginBottom: 24, flexWrap: 'wrap' }}>
         <button
           className={`btn ${activeTab === 'all' ? 'btn-primary' : 'btn-outline'}`}
           onClick={() => setActiveTab('all')}
         >
           All Pending ({total})
+        </button>
+        <button
+          className={`btn ${activeTab === 'chats' ? 'btn-primary' : 'btn-outline'}`}
+          onClick={() => setActiveTab('chats')}
+        >
+          <MessageSquareQuote size={14} /> Teams Chats ({data.pendingChatDrafts?.length || 0})
         </button>
         <button
           className={`btn ${activeTab === 'emails' ? 'btn-primary' : 'btn-outline'}`}
@@ -215,6 +284,76 @@ export function AuthorizationInbox() {
         />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+          {/* Teams Chat Drafts */}
+          {(activeTab === 'all' || activeTab === 'chats') &&
+            (data.pendingChatDrafts || []).map((chat) => (
+              <div key={chat.id} className="card card-pad" style={{ borderLeft: '4px solid #6366f1' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <span className="badge purple" style={{ background: '#ede9fe', color: '#6366f1' }}>
+                      <MessageSquareQuote size={12} /> Teams Chat Inquiry
+                    </span>
+                    <span className="muted tiny">{formatDate(chat.createdAt)}</span>
+                    {chat.courtesyNoticeSent && (
+                      <span className="badge yellow" style={{ background: '#fef3c7', color: '#b45309', fontSize: 11 }}>
+                        Courtesy Notice Sent
+                      </span>
+                    )}
+                  </div>
+                  {chat.confidence && (
+                    <span className="badge orange">Confidence: {Math.round(chat.confidence * 100)}%</span>
+                  )}
+                </div>
+
+                <h3 style={{ fontSize: 17, margin: '0 0 6px', fontWeight: 600 }}>{chat.incomingMessage}</h3>
+                <div className="muted tiny" style={{ marginBottom: 14 }}>From: {chat.senderName} {chat.senderEmail ? `(${chat.senderEmail})` : ''}</div>
+
+                <div style={{ background: '#f4f1eb', padding: '12px 16px', borderRadius: 6, fontSize: 13, marginBottom: 14 }}>
+                  <strong>Incoming Message / Inquiry:</strong>
+                  <p style={{ margin: '6px 0 0', color: '#4a4556', whiteSpace: 'pre-wrap' }}>{chat.incomingMessage}</p>
+                </div>
+
+                <div style={{ background: '#fffdf9', border: '1px solid #e5dfd5', padding: '14px 18px', borderRadius: 6, fontSize: 14, marginBottom: 14 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#c65131', fontWeight: 600, fontSize: 12, marginBottom: 6 }}>
+                    <Sparkles size={14} /> AI TWIN PROPOSED RESPONSE:
+                  </div>
+                  <p style={{ margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{chat.twinDraftResponse}</p>
+                  {chat.reasoning && (
+                    <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #e5dfd5', fontSize: 12, color: '#797480' }}>
+                      <strong>Engineering Rationale:</strong> {chat.reasoning}
+                    </div>
+                  )}
+                </div>
+
+                <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+                  <button
+                    className="btn btn-outline"
+                    style={{ color: '#dc2626', borderColor: '#fca5a5' }}
+                    onClick={() => setRejectingItem({ itemType: 'chat_draft', itemId: chat.id, contextTitle: chat.incomingMessage })}
+                  >
+                    <XCircle size={14} /> Reject & Train
+                  </button>
+                  <button
+                    className="btn btn-outline"
+                    onClick={() => {
+                      setEditingItem({ itemType: 'chat_draft', itemId: chat.id, originalContent: chat.twinDraftResponse, contextTitle: chat.incomingMessage });
+                      setEditText(chat.twinDraftResponse);
+                    }}
+                  >
+                    <Edit3 size={14} /> Edit & Authorize
+                  </button>
+                  <button
+                    className="btn btn-primary"
+                    style={{ background: '#6366f1', borderColor: '#6366f1' }}
+                    disabled={authorizeMutation.isPending}
+                    onClick={() => handleAuthorize('chat_draft', chat.id)}
+                  >
+                    <Check size={14} /> Authorize & Send to Teams
+                  </button>
+                </div>
+              </div>
+            ))}
+
           {/* Email Drafts */}
           {(activeTab === 'all' || activeTab === 'emails') &&
             data.pendingEmails.map((email) => (
@@ -234,7 +373,7 @@ export function AuthorizationInbox() {
 
                 <div style={{ background: '#f4f1eb', padding: '12px 16px', borderRadius: 6, fontSize: 13, marginBottom: 14 }}>
                   <strong>Incoming Message:</strong>
-                  <p style={{ margin: '6px 0 0', color: '#4a4556', whiteSpace: 'pre-wrap' }}>{email.incomingBody}</p>
+                  <p style={{ margin: '6px 0 0', color: '#4a4556', whiteSpace: 'pre-wrap' }}>{cleanDisplayBody(email.incomingBody)}</p>
                 </div>
 
                 <div style={{ background: '#fffdf9', border: '1px solid #e5dfd5', padding: '14px 18px', borderRadius: 6, fontSize: 14, marginBottom: 14 }}>

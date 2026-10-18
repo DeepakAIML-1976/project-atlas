@@ -47,6 +47,118 @@ if (process.env.CLERK_SECRET_KEY) {
   logger.info("CLERK_SECRET_KEY not provided - enabling Local SME Dev Mode");
 }
 
+// Microsoft 365 OAuth callback endpoint (interactive browser flow satisfying Entra ID Security Defaults)
+app.get("/auth/callback", async (req, res): Promise<void> => {
+  const code = req.query.code as string;
+  const state = req.query.state as string;
+  if (!code) {
+    res.status(400).send("Authorization code missing in callback.");
+    return;
+  }
+
+  const { getPkceVerifier } = await import("./lib/pkce");
+  const codeVerifier = state ? getPkceVerifier(state) : undefined;
+
+  const tenantId = process.env.MS_GRAPH_TENANT_ID || "5af47cf9-2cb5-4b53-a5ec-f7fa67c69552";
+  const clientId = process.env.MS_GRAPH_CLIENT_ID || "36cd549a-b6da-4af7-a41c-c898a8d7553e";
+  const clientSecret = process.env.MS_GRAPH_CLIENT_SECRET || "";
+  const redirectUri = "http://localhost:5000/auth/callback";
+
+  try {
+    const buildParams = (includeSecret: boolean, includeVerifier: boolean) => {
+      const p = new URLSearchParams({
+        client_id: clientId,
+        grant_type: "authorization_code",
+        code,
+        redirect_uri: redirectUri,
+        scope: "https://graph.microsoft.com/Chat.ReadWrite https://graph.microsoft.com/ChatMessage.Send https://graph.microsoft.com/User.Read offline_access",
+      });
+      if (includeVerifier && codeVerifier) {
+        p.append("code_verifier", codeVerifier);
+      }
+      if (includeSecret && clientSecret) {
+        p.append("client_secret", clientSecret);
+      }
+      return p;
+    };
+
+    // Try with PKCE code_verifier first (standard for Public Client flow)
+    let tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/x-www-form-urlencoded" },
+      body: buildParams(false, true).toString(),
+    });
+
+    let tokens = (await tokenRes.json()) as any;
+    if (tokens.error && clientSecret && (tokens.error_description?.includes("client_secret") || tokens.error === "invalid_client")) {
+      tokenRes = await fetch(`https://login.microsoftonline.com/${tenantId}/oauth2/v2.0/token`, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: buildParams(true, true).toString(),
+      });
+      tokens = (await tokenRes.json()) as any;
+    }
+    if (tokens.access_token) {
+      const candidatePaths = [
+        path.resolve(process.cwd(), "scratch/teams_delegated_tokens.json"),
+        path.resolve(process.cwd(), "../../scratch/teams_delegated_tokens.json"),
+      ];
+      for (const tokenFilePath of candidatePaths) {
+        try {
+          fs.mkdirSync(path.dirname(tokenFilePath), { recursive: true });
+          fs.writeFileSync(tokenFilePath, JSON.stringify(tokens, null, 2));
+        } catch (_) {}
+      }
+
+      if (tokens.refresh_token) {
+        process.env.MS_GRAPH_REFRESH_TOKEN = tokens.refresh_token;
+        const candidateEnv = [
+          path.resolve(process.cwd(), ".env"),
+          path.resolve(process.cwd(), "../../.env"),
+        ];
+        for (const envPath of candidateEnv) {
+          if (fs.existsSync(envPath)) {
+            try {
+              let envText = fs.readFileSync(envPath, "utf8");
+              if (envText.includes("MS_GRAPH_REFRESH_TOKEN=")) {
+                envText = envText.replace(/MS_GRAPH_REFRESH_TOKEN=.*$/m, `MS_GRAPH_REFRESH_TOKEN=${tokens.refresh_token}`);
+              } else {
+                envText += `\nMS_GRAPH_REFRESH_TOKEN=${tokens.refresh_token}`;
+              }
+              fs.writeFileSync(envPath, envText, "utf8");
+            } catch (_) {}
+          }
+        }
+      }
+
+      res.send(`<!DOCTYPE html>
+<html>
+<head><title>Microsoft Teams Connected</title></head>
+<body style="font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; text-align: center; padding: 60px; background: #0f172a; color: white;">
+  <div style="max-width: 500px; margin: 0 auto; background: #1e293b; padding: 40px; border-radius: 12px; border: 1px solid #334155;">
+    <h2 style="color: #22c55e; margin-top: 0;">Microsoft Teams Connected!</h2>
+    <p style="font-size: 15px; color: #94a3b8; line-height: 1.5;">
+      Delegated permissions have been refreshed successfully for <strong>Deepak Paranjape</strong>.
+      Teams and Outlook messaging is active.
+    </p>
+    <p style="margin-top: 30px;">
+      <a href="http://localhost:3000/authorization-inbox" style="display: inline-block; background: #2563eb; color: white; padding: 12px 28px; text-decoration: none; border-radius: 6px; font-weight: 600;">
+        Open Authorization Inbox
+      </a>
+    </p>
+  </div>
+  <script>setTimeout(() => window.location.href = 'http://localhost:3000/authorization-inbox', 2000);</script>
+</body>
+</html>`);
+      return;
+    }
+
+    res.status(500).send(`Token exchange error: ${JSON.stringify(tokens)}`);
+  } catch (err: any) {
+    res.status(500).send(`OAuth callback error: ${err?.message}`);
+  }
+});
+
 app.use("/api", router);
 
 // Explicit 404 JSON response for unhandled API routes

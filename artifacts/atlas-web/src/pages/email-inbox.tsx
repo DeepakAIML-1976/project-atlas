@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Mail, Plus, Sparkles, Send, ShieldCheck, CheckCircle2, XCircle, ArrowRight, MessageSquare, AlertCircle } from 'lucide-react';
+import { Mail, Plus, Sparkles, RefreshCw, ShieldCheck, ArrowRight } from 'lucide-react';
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } from '@/components/atlas-ui';
 import { Link } from 'wouter';
 
@@ -21,9 +21,45 @@ interface EmailDraftsData {
   emailDrafts: EmailDraft[];
 }
 
+interface LLMStatusData {
+  isConfigured: boolean;
+  provider: string;
+  model: string;
+}
+
+function cleanDisplayBody(text?: string | null): string {
+  if (!text) return '';
+  if (/<[a-z][\s\S]*>/i.test(text)) {
+    return text
+      .replace(/<style[\s\S]*?<\/style>/gi, '')
+      .replace(/<script[\s\S]*?<\/script>/gi, '')
+      .replace(/<head[\s\S]*?<\/head>/gi, '')
+      .replace(/<!--[\s\S]*?-->/g, '')
+      .replace(/<\/(p|div|tr|li|h[1-6]|br)>/gi, '\n')
+      .replace(/<br\s*\/?>/gi, '\n')
+      .replace(/<[^>]+>/g, ' ')
+      .replace(/&nbsp;/gi, ' ')
+      .replace(/&amp;/gi, '&')
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;/gi, "'")
+      .replace(/&lt;/gi, '<')
+      .replace(/&gt;/gi, '>')
+      .split('\n')
+      .map((l) => l.trim())
+      .filter(Boolean)
+      .join('\n');
+  }
+  return text;
+}
+
+import { getActiveOwnerEmail } from '@workspace/api-client-react';
+
 export function EmailInbox() {
   const queryClient = useQueryClient();
+  const activeOwner = getActiveOwnerEmail();
   const [isIngesting, setIsIngesting] = useState(false);
+  const [isSyncing, setIsSyncing] = useState(false);
+  const [redraftingId, setRedraftingId] = useState<string | null>(null);
 
   // Ingest form state
   const [sender, setSender] = useState('John Engineering <john.doe@epc-contractor.com>');
@@ -31,10 +67,21 @@ export function EmailInbox() {
   const [incomingBody, setIncomingBody] = useState('Hi Deepak,\n\nCould you please clarify the required ASME flange pressure rating and material grade for the 8-inch wet sour gas line downstream of the high pressure separator?\n\nThanks,\nJohn Doe');
 
   const emailsQuery = useQuery<EmailDraftsData>({
-    queryKey: ['/api/atlas/email-drafts'],
+    queryKey: ['/api/atlas/email-drafts', activeOwner],
     queryFn: async () => {
-      const res = await fetch('/api/atlas/email-drafts');
+      const res = await fetch('/api/atlas/email-drafts', {
+        headers: { 'X-Owner-Email': activeOwner },
+      });
       if (!res.ok) throw new Error('Failed to fetch email drafts');
+      return res.json();
+    },
+  });
+
+  const llmQuery = useQuery<LLMStatusData>({
+    queryKey: ['/api/atlas/llm/status'],
+    queryFn: async () => {
+      const res = await fetch('/api/atlas/llm/status');
+      if (!res.ok) throw new Error('Failed to fetch LLM status');
       return res.json();
     },
   });
@@ -56,10 +103,47 @@ export function EmailInbox() {
     },
   });
 
+  const redraftAllMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/atlas/email-drafts/redraft-all', { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to redraft pending emails');
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/authorization-inbox'] });
+      alert(`Successfully regenerated ${data.count || 0} pending email draft(s) with AI Twin!`);
+    },
+    onError: (err: any) => {
+      alert(`Error regenerating drafts: ${err.message}`);
+    },
+  });
+
+  const redraftOneMutation = useMutation({
+    mutationFn: async (id: string) => {
+      setRedraftingId(id);
+      const res = await fetch(`/api/atlas/email-drafts/${id}/redraft`, { method: 'POST' });
+      if (!res.ok) throw new Error('Failed to redraft email');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/authorization-inbox'] });
+    },
+    onError: (err: any) => {
+      alert(`Error regenerating draft: ${err.message}`);
+    },
+    onSettled: () => {
+      setRedraftingId(null);
+    },
+  });
+
   if (emailsQuery.isLoading) return <Load count={4} />;
   if (emailsQuery.isError) return <ErrorState retry={() => emailsQuery.refetch()} />;
 
   const drafts = emailsQuery.data?.emailDrafts ?? [];
+  const pendingCount = drafts.filter((d) => d.status === 'pending_authorization').length;
+  const llmInfo = llmQuery.data;
 
   const handleIngestSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,27 +160,44 @@ export function EmailInbox() {
         eyebrow="COGNITIVE SUITE / EMAIL INGESTION & TWIN DRAFTS"
         title="Email Ingestion & Pre-Drafting"
         italic="replies drafted for you."
-        description="Your AI Digital Twin reads incoming technical inquiries from your live Outlook inbox via Microsoft Graph API, scans your 35-year Piping SME heuristics, pre-drafts rigorous response emails, and routes them to your Executive Authorization Inbox for sign-off."
+        description="Your AI Digital Twin reads incoming technical inquiries from your live Outlook desktop app, applies your 35-year Piping SME heuristics & DeepSeek intelligence, pre-drafts rigorous responses, and routes them to your Executive Authorization Inbox for sign-off."
         action={
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            {pendingCount > 0 && (
+              <button
+                className="btn btn-outline"
+                disabled={redraftAllMutation.isPending}
+                onClick={() => redraftAllMutation.mutate()}
+                title="Regenerate all pending drafts using your configured AI model (DeepSeek)"
+              >
+                <Sparkles size={15} /> {redraftAllMutation.isPending ? 'Regenerating…' : 'Regenerate Drafts with AI'}
+              </button>
+            )}
             <button
               className="btn btn-outline"
+              disabled={isSyncing}
               onClick={async () => {
                 try {
+                  setIsSyncing(true);
                   const res = await fetch('/api/atlas/integrations/outlook/sync', { method: 'POST' });
                   const data = await res.json();
                   if (!res.ok || !data.success) {
-                    alert(`Live Outlook Sync Setup Required:\n\n${data.error || 'Configure Microsoft Graph API credentials in your .env file.'}\n\nKey: MS_GRAPH_ACCESS_TOKEN or MS_GRAPH_CLIENT_ID`);
+                    alert(`Outlook Sync Notice:\n\n${data.error || 'Failed to sync with live Outlook.'}`);
                   } else {
-                    alert(`Successfully synced ${data.count} live emails from Outlook Inbox!`);
+                    const scanned = data.scanned ?? data.count ?? 0;
+                    const drafted = data.drafted ?? (data.count !== undefined ? data.count : 0);
+                    alert(`Outlook Sync Complete!\n\nScanned ${scanned} email(s) from Microsoft 365.\nCreated ${drafted} new pending AI draft(s).`);
                     queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
+                    queryClient.invalidateQueries({ queryKey: ['/api/atlas/authorization-inbox'] });
                   }
                 } catch (err: any) {
                   alert(`Outlook Sync Error: ${err.message}`);
+                } finally {
+                  setIsSyncing(false);
                 }
               }}
             >
-              <Mail size={15} /> Sync Live Outlook Inbox
+              <Mail size={15} /> {isSyncing ? 'Syncing Inbox…' : 'Sync Live Outlook Inbox'}
             </button>
             <button className="btn btn-primary" onClick={() => setIsIngesting(true)}>
               <Plus size={15} /> Ingest Technical Query
@@ -105,11 +206,20 @@ export function EmailInbox() {
         }
       />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-        <div style={{ display: 'flex', gap: 10 }}>
-          <span className="badge green">Live Outlook Webhook Ready</span>
-          <span className="badge green">Consent-First Routing Active</span>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span className="badge green">Live Outlook Desktop Linked</span>
+          {llmInfo?.isConfigured ? (
+            <span className="badge green" title={`AI Provider: ${llmInfo.provider}, Model: ${llmInfo.model}`}>
+              AI Engine: {llmInfo.provider.toUpperCase()} ({llmInfo.model})
+            </span>
+          ) : (
+            <span className="badge orange" title="Add DEEPSEEK_API_KEY in .env to activate DeepSeek">
+              AI Engine: Heuristic Rules (Add DEEPSEEK_API_KEY in .env)
+            </span>
+          )}
           <span className="badge">{drafts.length} Ingested Emails</span>
+          {pendingCount > 0 && <span className="badge orange">{pendingCount} Pending Authorization</span>}
         </div>
         <Link href="/authorization-inbox" className="btn btn-outline" style={{ fontSize: 13 }}>
           Open Executive Authorization Inbox <ShieldCheck size={14} />
@@ -120,7 +230,7 @@ export function EmailInbox() {
         <Empty
           icon={Mail}
           title="No Ingested Emails"
-          description="Simulate an incoming technical query from a client, vendor, or contractor to see how your digital twin pre-drafts replies using your engineering heuristics."
+          description="Sync your live Outlook inbox or simulate an incoming technical query to see how your digital twin pre-drafts replies using your engineering heuristics."
           action={
             <button className="btn btn-primary" onClick={() => setIsIngesting(true)}>
               <Plus size={14} /> Ingest Test Email
@@ -148,7 +258,7 @@ export function EmailInbox() {
 
               <div style={{ background: '#f4f1eb', padding: '12px 16px', borderRadius: 6, fontSize: 13, marginBottom: 14 }}>
                 <strong>Incoming Inquiry:</strong>
-                <p style={{ margin: '6px 0 0', color: '#4a4556', whiteSpace: 'pre-wrap' }}>{draft.incomingBody}</p>
+                <p style={{ margin: '6px 0 0', color: '#4a4556', whiteSpace: 'pre-wrap' }}>{cleanDisplayBody(draft.incomingBody)}</p>
               </div>
 
               <div style={{ background: '#fffdf9', border: '1px solid #e5dfd5', padding: '14px 18px', borderRadius: 6, fontSize: 14, marginBottom: 14 }}>
@@ -164,7 +274,17 @@ export function EmailInbox() {
               </div>
 
               {draft.status === 'pending_authorization' && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                  <button
+                    className="btn btn-outline"
+                    style={{ fontSize: 13 }}
+                    disabled={redraftingId === draft.id}
+                    onClick={() => redraftOneMutation.mutate(draft.id)}
+                    title="Regenerate this specific draft"
+                  >
+                    <RefreshCw size={13} className={redraftingId === draft.id ? 'spin' : ''} />
+                    {redraftingId === draft.id ? 'Regenerating…' : 'Re-draft with AI'}
+                  </button>
                   <Link href="/authorization-inbox" className="btn btn-primary" style={{ fontSize: 13 }}>
                     Review in Executive Inbox <ArrowRight size={14} />
                   </Link>

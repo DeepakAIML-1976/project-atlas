@@ -1,12 +1,11 @@
 import { chromium } from "playwright";
-import fs from "node:fs";
 import path from "node:path";
+import fs from "node:fs";
 
-const meetingUrl = process.env.TARGET_MEETING_URL || "https://teams.live.com/meet/9316037901950?p=SSIGbvBMKPS7lxh5OZ";
+const meetingUrl = process.env.TARGET_MEETING_URL || "https://teams.microsoft.com/meet/3974193108816856?p=czVGm69wMuy3elTrcm";
 const rawBotName = process.env.BOT_DISPLAY_NAME || "Deepak AI Representative Atlas";
 const botName = rawBotName.replace(/[()'"]/g, "").trim() || "Deepak AI Representative Atlas";
 const artifactDir = "C:\\Users\\dpeng\\.gemini\\antigravity\\brain\\a6139213-1b01-4be2-a990-f6942830b6a6";
-const screenshotPath = path.join(artifactDir, "live_teams_attendees_proof.png");
 
 async function main() {
   console.log(`[ATLAS BOT] Launching Chromium browser worker to join live Teams call...`);
@@ -16,15 +15,15 @@ async function main() {
     headless: true,
     args: [
       "--use-fake-ui-for-media-stream",
-      "--use-fake-device-for-media-stream",
       "--no-sandbox",
       "--disable-setuid-sandbox",
       "--disable-blink-features=AutomationControlled",
+      "--mute-audio",
     ]
   });
 
   const context = await browser.newContext({
-    permissions: ["microphone", "camera"],
+    permissions: [],
     viewport: { width: 1280, height: 800 },
     userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
   });
@@ -33,151 +32,236 @@ async function main() {
 
   console.log(`[ATLAS BOT] Navigating to MS Teams live meeting URL...`);
   await page.goto(meetingUrl, { waitUntil: "domcontentloaded", timeout: 60000 });
+  await page.waitForTimeout(6000);
 
-  await page.waitForTimeout(5000);
-
-  // Take step 1 screenshot
-  await page.screenshot({ path: path.join(artifactDir, "teams_step1.png") });
-
-  // Click "Continue on this browser" if button or link exists
-  try {
-    const webBtn = page.locator('button:has-text("Continue on this browser"), a:has-text("Continue on this browser"), button:has-text("Join on the web"), button:has-text("Continue in this browser")').first();
-    if (await webBtn.isVisible({ timeout: 10000 })) {
-      console.log(`[ATLAS BOT] Found and clicking 'Continue on this browser'...`);
-      await webBtn.click();
-    } else {
-      console.log(`[ATLAS BOT] 'Continue on this browser' button not visible immediately.`);
-    }
-  } catch (e) {
-    console.log(`[ATLAS BOT] Web join check error:`, e.message);
-  }
-
-  // Wait for the Teams SPA pre-join form to load
-  console.log(`[ATLAS BOT] Waiting up to 30s for pre-join name input field...`);
-  try {
-    const nameInput = page.locator('input[placeholder*="name" i], input[aria-label*="name" i], input[type="text"]').first();
-    await nameInput.waitFor({ state: "visible", timeout: 35000 });
-    console.log(`[ATLAS BOT] Name input box located! Filling name: "${botName}"...`);
-    await nameInput.click();
-    await nameInput.fill(botName);
+  // 1. Click "Continue on this browser"
+  for (let i = 0; i < 5; i++) {
+    try {
+      const webBtn = page.locator('button:has-text("Continue on this browser"), a:has-text("Continue on this browser"), button:has-text("Join on the web"), button:has-text("Continue in this browser"), button:has-text("Join meeting on the web")').first();
+      if (await webBtn.isVisible({ timeout: 3000 })) {
+        console.log(`[ATLAS BOT] Clicking 'Continue on this browser'...`);
+        await webBtn.click();
+        await page.waitForTimeout(4000);
+        break;
+      }
+    } catch (e) {}
     await page.waitForTimeout(1000);
-  } catch (e) {
-    console.log(`[ATLAS BOT] Could not find name input within 35s. Dumping HTML preview...`);
-    const pageContent = await page.content();
-    console.log(`[ATLAS BOT] Page URL: ${page.url()}`);
-    console.log(`[ATLAS BOT] Body text preview: ${ (await page.innerText('body')).slice(0, 500) }`);
   }
 
-  await page.screenshot({ path: path.join(artifactDir, "teams_step3_name_filled.png") });
+  // 2. Fill name and turn off mic/cam
+  for (let attempt = 1; attempt <= 10; attempt++) {
+    try {
+      const nameInput = page.locator('input[placeholder*="name" i], input[aria-label*="name" i], input[type="text"]').first();
+      if (await nameInput.isVisible({ timeout: 3000 })) {
+        await nameInput.click();
+        await nameInput.fill("");
+        await nameInput.type(botName, { delay: 20 });
+        console.log(`[ATLAS BOT SUCCESS] Display name set to: "${botName}"`);
+        break;
+      }
+    } catch (e) {}
+    await page.waitForTimeout(2000);
+  }
 
-  // Click Join Now button
   try {
-    const joinBtn = page.locator('button:has-text("Join now"), button:has-text("Join meeting"), button:has-text("Join"), button[id*="join" i]').first();
-    if (await joinBtn.isVisible({ timeout: 10000 })) {
-      console.log(`[ATLAS BOT] Found and clicking 'Join now' button...`);
-      await joinBtn.click();
-    } else {
-      console.log(`[ATLAS BOT] Join button not found, pressing Enter...`);
-      await page.keyboard.press("Enter");
+    const dontUseAudio = page.locator('div:has-text("Don\'t use audio"), label:has-text("Don\'t use audio"), span:has-text("Don\'t use audio")').first();
+    if (await dontUseAudio.isVisible({ timeout: 3000 })) {
+      await dontUseAudio.click({ force: true });
+      console.log(`[ATLAS BOT] Selected "Don't use audio" (Mic OFF).`);
     }
-  } catch (e) {
-    console.log(`[ATLAS BOT] Join click error:`, e.message);
+  } catch (e) {}
+
+  // 3. Click Join now
+  for (let attempt = 1; attempt <= 5; attempt++) {
+    try {
+      const joinBtn = page.locator('button:has-text("Join now"), button:has-text("Join meeting"), button:has-text("Join"), button[id*="join" i]').first();
+      if (await joinBtn.isVisible({ timeout: 3000 })) {
+        await joinBtn.click();
+        console.log(`[ATLAS BOT SUCCESS] Clicked 'Join now' button!`);
+        break;
+      }
+    } catch (e) {}
+    await page.waitForTimeout(2000);
   }
 
-  console.log(`[ATLAS BOT] Waiting for lobby state...`);
-  await page.waitForTimeout(5000);
+  console.log(`[ATLAS BOT] Waiting for host admission...`);
+  let admitted = false;
 
-  const initialText = await page.innerText('body').catch(() => '');
-  console.log(`[ATLAS BOT] Current status: ${initialText.includes("let you in") ? "IN LOBBY" : "JOINING"}`);
-  
-  // Always save initial lobby screenshot proof
-  await page.screenshot({ path: screenshotPath, fullPage: true });
-
-  console.log(`[ATLAS BOT] Polling for up to 120s for host admission into live call stage...`);
-
-  for (let i = 1; i <= 24; i++) {
-    await page.waitForTimeout(5000);
-    const bodyText = await page.innerText('body').catch(() => '');
-    
-    // Check if people panel button or call controls exist on stage
-    const hasControls = await page.locator('button[aria-label*="People" i], button[aria-label*="Participants" i], button[aria-label*="Leave" i], button[aria-label*="Hang up" i]').isVisible().catch(() => false);
-
-    if (hasControls || (!bodyText.includes("let you in") && !bodyText.includes("Type your name") && bodyText.length > 50)) {
-      console.log(`[ATLAS BOT] Check #${i}: Bot ADMITTED to live meeting stage! Opening People roster & Chat panel...`);
+  async function findChatInput() {
+    for (const frame of page.frames()) {
       try {
-        const peopleBtn = page.locator('button[aria-label*="People" i], button[aria-label*="Participants" i], button:has-text("People"), button[aria-label*="roster" i]').first();
-        if (await peopleBtn.isVisible({ timeout: 5000 })) {
-          await peopleBtn.click();
-          await page.waitForTimeout(2000);
+        const input = frame.locator('div[role="textbox"], div[contenteditable="true"], textarea[placeholder*="Type a message" i], div[aria-label*="Type a message" i]').first();
+        if (await input.isVisible().catch(() => false)) {
+          return { frame, input };
         }
       } catch (e) {}
-      await page.screenshot({ path: screenshotPath, fullPage: true });
-      console.log(`[ATLAS BOT] Live meeting stage screenshot proof saved to: ${screenshotPath}`);
+    }
+    return null;
+  }
 
-      // Open Teams Chat Panel inside Teams UI
+  async function getCombinedChatText() {
+    const texts = [];
+    for (const frame of page.frames()) {
       try {
-        const chatBtn = page.locator('button[aria-label*="Chat" i], button[aria-label*="chat" i], button:has-text("Chat")').first();
-        if (await chatBtn.isVisible({ timeout: 5000 })) {
-          console.log(`[ATLAS BOT] Opening Teams UI Chat Panel...`);
-          await chatBtn.click();
-          await page.waitForTimeout(2000);
-        }
+        const txt = await frame.innerText('body').catch(() => '');
+        if (txt) texts.push(txt);
       } catch (e) {}
+    }
+    return texts.join('\n');
+  }
 
-      // Helper function to post messages directly into Teams Chat UI
-      async function postToTeamsChatUI(messageText) {
+  async function postMessageToTeams(messageText) {
+    const foundInput = await findChatInput();
+    if (foundInput) {
+      const { frame, input } = foundInput;
+      console.log(`[ATLAS BOT] Posting message to Teams chat: "${messageText.slice(0, 50)}..."`);
+      
+      await input.click();
+      await input.focus();
+
+      await input.evaluate((el, text) => {
+        el.focus();
+        document.execCommand('selectAll', false, null);
+        document.execCommand('insertText', false, text);
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+        el.dispatchEvent(new Event('change', { bubbles: true }));
+      }, messageText);
+
+      await frame.waitForTimeout(500);
+
+      const sendBtn = frame.locator('button[aria-label*="Send" i], button[title="Send" i], svg[data-icon-name="Send"]').first();
+      if (await sendBtn.isVisible().catch(() => false)) {
+        await sendBtn.click();
+      } else {
+        await frame.keyboard.press("Enter");
+      }
+
+      console.log(`[ATLAS BOT SUCCESS] Message posted directly to Teams Chat UI!`);
+      await page.waitForTimeout(2000);
+      await page.screenshot({ path: path.join(artifactDir, "teams_sunil_invite_proof.png") }).catch(() => {});
+      return true;
+    }
+    return false;
+  }
+
+  let chatPaneOpen = false;
+  let sunilInvited = false;
+  const processedMessageHashes = new Set();
+
+  while (true) {
+    await page.waitForTimeout(500);
+
+    if (!admitted) {
+      const stageControl = page.locator('button[aria-label*="People" i], button:has-text("People"), button[aria-label*="Leave" i], button:has-text("Leave"), button[aria-label*="More" i], button:has-text("More")').first();
+      if (await stageControl.isVisible().catch(() => false)) {
+        console.log(`[ATLAS BOT SUCCESS] Bot ADMITTED to live meeting stage!`);
+        admitted = true;
+      } else {
+        continue;
+      }
+    }
+
+    if (!chatPaneOpen) {
+      const found = await findChatInput();
+      if (found) {
+        chatPaneOpen = true;
+        console.log(`[ATLAS BOT SUCCESS] Chat input detected in DOM!`);
+      } else {
         try {
-          const input = page.locator('div[contenteditable="true"], div[aria-label*="Type a message" i], textarea[placeholder*="Type a message" i]').first();
-          if (await input.isVisible({ timeout: 5000 })) {
-            await input.click();
-            await input.fill(messageText);
-            await page.waitForTimeout(500);
-            const sendBtn = page.locator('button[aria-label*="Send" i], button[title="Send"]').first();
-            if (await sendBtn.isVisible({ timeout: 2000 })) {
-              await sendBtn.click();
-            } else {
-              await page.keyboard.press("Enter");
+          const directChatBtn = page.locator('button[aria-label*="Chat" i], button:has-text("Chat")').first();
+          if (await directChatBtn.isVisible().catch(() => false)) {
+            await directChatBtn.click();
+            await page.waitForTimeout(1500);
+          } else {
+            const moreBtn = page.locator('button[aria-label*="More" i], button:has-text("More")').first();
+            if (await moreBtn.isVisible().catch(() => false)) {
+              await moreBtn.click();
+              await page.waitForTimeout(800);
+              const chatMenuItem = page.locator('div[role="menuitem"]:has-text("Chat"), button:has-text("Chat"), span:has-text("Chat")').first();
+              if (await chatMenuItem.isVisible().catch(() => false)) {
+                await chatMenuItem.click();
+                await page.waitForTimeout(1500);
+              }
             }
-            console.log(`[ATLAS BOT] Successfully posted reply into Teams Chat UI: "${messageText.slice(0, 50)}..."`);
-            return true;
           }
-        } catch (e) {
-          console.log(`[ATLAS BOT] Chat post error:`, e.message);
-        }
-        return false;
+        } catch (e) {}
       }
+    }
 
-      // Continuous Live Meeting Monitoring Loop
-      console.log(`[ATLAS BOT] Active in Teams meeting stage. Monitoring DOM captions and Teams chat for wake-up terms...`);
-      const seenTexts = new Set();
+    // Immediately post invitation to Sunil Hiremath upon admission
+    if (admitted && !sunilInvited) {
+      const inviteMsg = `Deepak AI Representative Atlas: @Sunil Hiremath (sunil.hiremath@kentplc.com), Deepak has requested you to join this live Teams meeting: ${meetingUrl}`;
+      const posted = await postMessageToTeams(inviteMsg);
+      if (posted) {
+        sunilInvited = true;
+        console.log(`[ATLAS BOT SUCCESS] Posted meeting invitation for Sunil Hiremath!`);
+      }
+    }
 
-      for (let cycle = 1; cycle <= 60; cycle++) {
-        await page.waitForTimeout(5000);
-        const stageText = await page.innerText('body').catch(() => '');
+    // High-speed chat message monitor & responder
+    try {
+      const fullText = await getCombinedChatText();
+      const lines = fullText.split('\n').map(l => l.trim()).filter(l => l.length > 3);
+      
+      const candidateUserMessages = lines.filter(l => {
+        const lower = l.toLowerCase();
+        if (l.includes("Deepak AI Representative Atlas")) return false;
+        if (lower.includes("joined the conversation")) return false;
+        if (lower.includes("turned on for this meeting")) return false;
+        if (lower.includes("named the meeting")) return false;
+        if (lower.includes("invited to the meeting")) return false;
+        if (lower.includes("meeting started") || lower.includes("meeting ended")) return false;
+        if (lower.includes("continue on this browser") || lower.includes("join now")) return false;
+        if (lower === "chat" || lower === "people" || lower === "raise" || lower === "react" || lower === "view" || lower === "more" || lower === "leave") return false;
+        if (lower.includes("replying to external participants")) return false;
+        if (lower.includes("type a message")) return false;
+        return true;
+      });
 
-        // Check for new chat messages or captions containing 'Deepak'
-        if (stageText.toLowerCase().includes("deepak") && !seenTexts.has("deepak_query")) {
-          seenTexts.add("deepak_query");
-          console.log(`[ATLAS BOT] Detected 'Deepak' query in Teams meeting DOM! Formulating response...`);
-          const reply = "Deepak AI Representative Atlas: Based on Deepak's established engineering heuristics for ASME B31.3: High-pressure hydrocarbon piping requires Spiral Wound Gaskets with flexible graphite filler (ASME B16.20).";
-          await postToTeamsChatUI(reply);
-        }
+      if (candidateUserMessages.length > 0) {
+        const latestUserMsg = candidateUserMessages[candidateUserMessages.length - 1];
+        const msgHash = `${latestUserMsg.slice(0, 80)}_${latestUserMsg.length}`;
 
-        // Check for action items in stage text
-        if ((stageText.toLowerCase().includes("action item") || stageText.toLowerCase().includes("todo")) && !seenTexts.has("action_item")) {
-          seenTexts.add("action_item");
-          console.log(`[ATLAS BOT] Mined Action Item from Teams DOM text! Logging to background database...`);
+        if (!processedMessageHashes.has(msgHash)) {
+          processedMessageHashes.add(msgHash);
+          console.log(`[ATLAS BOT CHAT MESSAGE DETECTED]: "${latestUserMsg}"`);
+
+          let replyText = "";
+          try {
+            const apiRes = await fetch("http://localhost:5000/api/atlas/integrations/teams/browser-bot/transcript", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                liveMeetingId: "live_teams_call",
+                speakerName: "Teams User",
+                text: latestUserMsg,
+              }),
+            });
+            if (apiRes.ok) {
+              const data = await apiRes.json();
+              replyText = data.triggeredAlert?.twinProposedResponse || "";
+            }
+          } catch (e) {}
+
+          if (!replyText) {
+            const lowerMsg = latestUserMsg.toLowerCase();
+            if (lowerMsg.includes("sunil") || lowerMsg.includes("hiremath")) {
+              replyText = `I have sent a message and invitation to Sunil Hiremath (sunil.hiremath@kentplc.com) to join this Teams meeting.`;
+            } else if (lowerMsg.includes("1-on-1") || lowerMsg.includes("tomorrow") || lowerMsg.includes("call") || lowerMsg.includes("available")) {
+              replyText = `I am available for a 1-on-1 call tomorrow afternoon. Please confirm the time slot, or I can schedule it directly via your Outlook calendar.`;
+            } else {
+              replyText = `Thank you for your message. I have logged your request: "${latestUserMsg}" for Deepak's review.`;
+            }
+          }
+
+          const formattedReply = `Deepak AI Representative Atlas: ${replyText.replace(/^Deepak AI Representative Atlas:\s*/i, '')}`;
+          await postMessageToTeams(formattedReply);
         }
       }
-
-      break;
-    } else {
-      console.log(`[ATLAS BOT] Check #${i}: Still in meeting lobby...`);
-      await page.screenshot({ path: screenshotPath, fullPage: true });
+    } catch (e) {
+      console.log(`[ATLAS BOT ERROR] Chat processing error:`, e.message);
     }
   }
-
-  await browser.close();
 }
 
 main().catch(err => {

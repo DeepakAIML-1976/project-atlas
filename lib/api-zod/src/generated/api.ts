@@ -691,6 +691,20 @@ export const GetAuthorizationInboxResponse = zod.object({
   "humanAlertStatus": zod.string(),
   "createdAt": zod.coerce.date()
 })),
+  "pendingChatDrafts": zod.array(zod.object({
+  "id": zod.string(),
+  "chatId": zod.string(),
+  "messageId": zod.string(),
+  "senderName": zod.string(),
+  "senderEmail": zod.string().nullish(),
+  "incomingMessage": zod.string(),
+  "twinDraftResponse": zod.string(),
+  "reasoning": zod.string().nullish(),
+  "confidence": zod.number().nullish(),
+  "status": zod.string(),
+  "courtesyNoticeSent": zod.boolean().nullish(),
+  "createdAt": zod.coerce.date()
+})).optional(),
   "totalPending": zod.number().int()
 })
 
@@ -699,7 +713,7 @@ export const GetAuthorizationInboxResponse = zod.object({
  * @summary Authorize, edit & authorize, or reject a pending digital twin action
  */
 export const AuthorizeInboxItemBody = zod.object({
-  "itemType": zod.enum(['email_draft', 'meeting_contribution', 'decision', 'meeting_trigger']),
+  "itemType": zod.enum(['email_draft', 'meeting_contribution', 'decision', 'meeting_trigger', 'chat_draft']),
   "itemId": zod.string(),
   "action": zod.enum(['authorize', 'edit_authorize', 'reject']),
   "editedContent": zod.string().nullish(),

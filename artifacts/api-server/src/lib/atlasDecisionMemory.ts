@@ -1,6 +1,6 @@
 import { and, eq } from "drizzle-orm";
 import { atlasBenchmarkResultsTable, atlasDecisionsTable, atlasKnowledgeUnitsTable, db } from "@workspace/db";
-import OpenAI from "openai";
+import { getLLMConfig } from "./atlasLLM.js";
 
 export interface DecisionOption {
   optionName: string;
@@ -35,14 +35,13 @@ export async function evaluateDecisionTradeOffs(params: EvaluateDecisionParams) 
   let rejectedAlternatives = options.slice(1).map((o) => o.optionName);
   let confidence = 0.90;
 
-  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  const llm = getLLMConfig();
 
-  if (baseURL && apiKey) {
+  if (llm.isConfigured && llm.client) {
     try {
-      const client = new OpenAI({ baseURL, apiKey });
-      const res = await client.chat.completions.create({
-        model: "gpt-5.4-mini",
+      const res = await llm.client.chat.completions.create({
+        model: llm.model,
+        max_tokens: 2048,
         response_format: { type: "json_object" },
         messages: [
           {

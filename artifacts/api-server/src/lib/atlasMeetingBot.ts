@@ -7,7 +7,7 @@ import {
   atlasMeetingsTable,
   db,
 } from "@workspace/db";
-import OpenAI from "openai";
+import { getLLMConfig } from "./atlasLLM.js";
 
 export interface ProcessTranscriptResult {
   processed: boolean;
@@ -46,53 +46,19 @@ export async function processLiveTranscriptChunk(
     .where(eq(atlasKnowledgeUnitsTable.workspaceId, workspaceId));
 
   let twinProposedResponse = "";
-  const baseURL = process.env.AI_INTEGRATIONS_OPENAI_BASE_URL;
-  const apiKey = process.env.AI_INTEGRATIONS_OPENAI_API_KEY;
+  const llm = getLLMConfig();
 
   if (triggerDetected) {
-    const relevantHeuristics = knowledgeUnits
-      .map((ku) => `[Domain: ${ku.domain}] Topic: ${ku.topic} -> Heuristic: ${ku.heuristic || ku.reasoning || "Standard SME Practice"}`)
-      .join("\n");
+    const { verifyContextAndResolve } = await import("./contextVerificationEngine.js");
+    const verification = await verifyContextAndResolve({
+      workspaceId,
+      senderName: speakerName,
+      messageText: text,
+      channel: "teams_call",
+      chatId: liveMeetingId,
+    });
 
-    if (baseURL && apiKey) {
-      try {
-        const client = new OpenAI({ baseURL, apiKey });
-        const res = await client.chat.completions.create({
-          model: "gpt-5.4-mini",
-          max_completion_tokens: 1024,
-          messages: [
-            {
-              role: "system",
-              content: `You are Deepak's AI Representative (Atlas) speaking in a live meeting.
-You represent Deepak, a 35-year Senior Oil & Gas Piping Engineering SME.
-Formulate a concise, authoritative technical response to the question asked by ${speakerName}.
-Ground your answer strictly in Deepak's established engineering heuristics below:
-
-${relevantHeuristics || "No custom heuristics recorded yet; use ASME B31.3 / API 570 standard piping principles."}
-
-IMPORTANT: Prepend your statement with "Deepak's AI Representative (Atlas):" to ensure transparent AI identification.`,
-            },
-            {
-              role: "user",
-              content: `Meeting question asked by ${speakerName}: "${text}"`,
-            },
-          ],
-        });
-
-        twinProposedResponse = res.choices[0]?.message?.content ?? "";
-      } catch (err) {
-        console.warn("AI meeting response generation fallback:", err);
-      }
-    }
-
-    if (!twinProposedResponse) {
-      const topHeuristic = knowledgeUnits[0]?.heuristic;
-      if (topHeuristic) {
-        twinProposedResponse = `Deepak's AI Representative (Atlas): Based on Deepak's established engineering heuristics: ${topHeuristic}`;
-      } else {
-        twinProposedResponse = `Deepak's AI Representative (Atlas): Deepak has received your query. Routing to Deepak's Executive Authorization Inbox for sign-off.`;
-      }
-    }
+    twinProposedResponse = verification.replyText;
 
     // Record meeting trigger alert for Executive Authorization Inbox sign-off
     const [alert] = await db

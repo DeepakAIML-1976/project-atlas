@@ -3,6 +3,7 @@ import { db, atlasLinkedAccountsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { workspaceContext } from "../lib/atlas";
 import { fetchLiveOutlookEmails, fetchLiveTeamsMeetings, getMSGraphConfig, verifyMSGraphToken } from "../lib/integrations/msGraph";
+import { readOutlookInbox, readOutlookSent, syncOutlookDesktop } from "../lib/integrations/outlookDesktop";
 import { fetchLiveZoomMeetings, getZoomConfig, handleZoomWebhookEvent } from "../lib/integrations/zoom";
 import { syncAllLinkedAccounts } from "../lib/integrations/teamsCalendarSync";
 import { joinTeamsLiveCallMediaStream } from "../lib/integrations/teamsCallingBot";
@@ -148,13 +149,53 @@ router.post("/atlas/integrations/outlook/sync", async (req, res): Promise<void> 
   const ctx = await workspaceContext(req, res);
   if (!ctx) return;
 
-  const result = await fetchLiveOutlookEmails(ctx.workspaceId, ctx.userId);
-  if (!result.success && result.requiresSetup) {
-    res.status(400).json(result);
-    return;
+  const msGraph = getMSGraphConfig();
+  const graphConfigured = Boolean(msGraph.accessToken || (msGraph.clientId && msGraph.clientSecret));
+
+  // Preferred: Microsoft Graph when the tenant has granted app access.
+  if (graphConfigured) {
+    const result = await fetchLiveOutlookEmails(ctx.workspaceId, ctx.userId);
+    if (result.success || !result.requiresSetup) {
+      res.json(result);
+      return;
+    }
   }
 
-  res.json(result);
+  // Fallback: signed-in Outlook desktop app (no admin consent needed). Draft-only.
+  const count = Math.min(Number(req.body?.count) || 10, 25);
+  const sinceHours = Number(req.body?.sinceHours) || 48;
+  const unreadOnly = req.body?.unreadOnly !== false;
+  const desktop = await syncOutlookDesktop(ctx.workspaceId, ctx.userId, { count, sinceHours, unreadOnly });
+  if (!desktop.success) {
+    res.status(502).json(desktop);
+    return;
+  }
+  res.json(desktop);
+});
+
+// Read-only previews of the signed-in Outlook desktop mailbox (nothing is stored or sent).
+router.get("/atlas/integrations/outlook/desktop/inbox", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+  try {
+    const count = Math.min(Number(req.query.count) || 10, 50);
+    const mails = await readOutlookInbox(count, Number(req.query.sinceHours) || 0, req.query.unreadOnly === "true");
+    res.json({ source: "outlook_desktop", folder: "inbox", count: mails.length, emails: mails.map((m) => ({ ...m, body: m.body.slice(0, 300) })) });
+  } catch (err: any) {
+    res.status(502).json({ error: err?.message || "Outlook desktop unavailable" });
+  }
+});
+
+router.get("/atlas/integrations/outlook/desktop/sent", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+  try {
+    const count = Math.min(Number(req.query.count) || 10, 50);
+    const mails = await readOutlookSent(count, Number(req.query.sinceHours) || 0);
+    res.json({ source: "outlook_desktop", folder: "sent", count: mails.length, emails: mails.map((m) => ({ ...m, body: m.body.slice(0, 300) })) });
+  } catch (err: any) {
+    res.status(502).json({ error: err?.message || "Outlook desktop unavailable" });
+  }
 });
 
 router.post("/atlas/integrations/teams/sync", async (req, res): Promise<void> => {
@@ -223,7 +264,7 @@ router.post("/atlas/integrations/teams/browser-bot/transcript", async (req, res)
 router.post("/atlas/integrations/teams/chat/message", async (req, res): Promise<void> => {
   const ctx = await workspaceContext(req, res);
   const workspaceId = ctx?.workspaceId || "default";
-  const { chatId, messageId, senderName, senderEmail, chatType, messageText, isMentioned, isReplyToDeepak } = req.body;
+  const { chatId, messageId, senderName, senderEmail, chatType, messageText, isMentioned, isReplyToDeepak, threadHistory } = req.body;
 
   if (!messageText || !senderName) {
     res.status(400).json({ error: "messageText and senderName are required fields." });
@@ -241,6 +282,7 @@ router.post("/atlas/integrations/teams/chat/message", async (req, res): Promise<
     messageText,
     isMentioned: Boolean(isMentioned),
     isReplyToDeepak: Boolean(isReplyToDeepak),
+    threadHistory: Array.isArray(threadHistory) ? threadHistory : [],
   });
 
   res.json(result);

@@ -1,4 +1,5 @@
 import { logger } from "../logger";
+import { resolveMSGraphToken } from "./msGraph.js";
 
 export interface TeamsCallingMeetingPayload {
   meetingUrl: string;
@@ -21,21 +22,13 @@ export async function joinTeamsLiveCallMediaStream(
   payload: TeamsCallingMeetingPayload,
   accessToken?: string
 ) {
-  if (!accessToken && !process.env.MS_GRAPH_ACCESS_TOKEN) {
+  const token = accessToken || (await resolveMSGraphToken());
+  if (!token) {
     return {
       success: false,
-      error: "Azure Bot Application Access Token missing. Requires Azure Bot Registration with Calls.JoinGroupCall.All permission.",
-      requiresAzureBot: true,
-      azureBotSetupRequired: [
-        "1. Register Azure Bot in portal.azure.com",
-        "2. Add Graph Permission: Calls.JoinGroupCall.All & Calls.AccessMedia.All",
-        "3. Configure Bot Webhook Callback URL: https://your-server.com/api/teams/calling/callback",
-        "4. Sideload Teams App Manifest into Microsoft Teams Client"
-      ]
+      error: "Microsoft Graph Access Token could not be resolved from Client Credentials.",
     };
   }
-
-  const token = accessToken || process.env.MS_GRAPH_ACCESS_TOKEN;
 
   try {
     // Microsoft Graph Calling API payload to join meeting via URL

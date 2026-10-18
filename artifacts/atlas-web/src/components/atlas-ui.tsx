@@ -18,16 +18,24 @@ const links = [
   { href:'/activity', label:'Activity', icon:Activity },
 ];
 
+import { ProfileSwitcher } from '@/components/profile-switcher';
+
 export function Brand({ light = false }: { light?:boolean }) {
   return <Link href="/" className="brand" data-testid="link-atlas-home"><span className="brand-mark">a</span><span className="brand-text" style={{color:light?'#292538':undefined}}>atlas<span style={{color:'#c97b59'}}>.</span></span></Link>;
 }
 
 function useSignOutHandler() {
+  const [, setLocation] = useLocation();
   try {
     const clerk = useClerk();
     return () => clerk.signOut({ redirectUrl: import.meta.env.BASE_URL });
   } catch {
-    return () => { window.location.href = import.meta.env.BASE_URL || '/'; };
+    return () => {
+      try {
+        localStorage.removeItem('atlas_active_owner_email');
+      } catch (_) {}
+      setLocation('/login');
+    };
   }
 }
 
@@ -42,12 +50,18 @@ export function Shell({ children, workspace }: { children:ReactNode; workspace?:
       <nav className="nav-list" aria-label="Workspace navigation">{links.map(({href,label,icon:Icon})=><Link href={href} className={`nav-item ${location===href?'active':''}`} key={href} title={label} data-testid={`link-${label.toLowerCase().replace(' ','-')}`}><Icon/><span>{label}</span></Link>)}</nav>
       <div className="sidebar-bottom">
         <div className="eyebrow" style={{color:'#dba581',fontSize:9}}>CURRENT SPACE</div>
-        <p style={{margin:'8px 0 18px',fontSize:12,color:'#e8e1dc',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} data-testid="text-workspace-name">{workspace || 'Your workspace'}</p>
-        <button className="nav-item" style={{width:'100%',border:0,background:'transparent'}} onClick={handleSignOut} data-testid="button-sign-out"><LogOut/><span>Sign out</span></button>
+        <p style={{margin:'8px 0 10px',fontSize:12,color:'#e8e1dc',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} data-testid="text-workspace-name">{workspace || 'Your workspace'}</p>
+        <ProfileSwitcher variant="sidebar" />
       </div>
     </aside>
     <div className="shell-main">
-      <header className="topbar"><div className="crumb"><span>Atlas</span><ChevronRight size={13}/><strong>{current}</strong></div><div className="badge green"><ShieldCheck size={11}/> Human governed</div></header>
+      <header className="topbar">
+        <div className="crumb"><span>Atlas</span><ChevronRight size={13}/><strong>{current}</strong></div>
+        <div style={{display:'flex',alignItems:'center',gap:16}}>
+          <div className="badge green"><ShieldCheck size={11}/> Human governed</div>
+          <ProfileSwitcher variant="topbar"/>
+        </div>
+      </header>
       <main className="main-content reveal">{children}</main>
     </div>
   </div>;

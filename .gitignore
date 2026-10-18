@@ -55,3 +55,14 @@ Thumbs.db
 .env
 *.env
 !.env.example
+
+# Runtime tokens & session caches
+scratch/teams_delegated_tokens.json
+scratch/teams_auth_status.json
+scratch/teams_user_data/
+scratch/extracted_kent_emails.json
+scratch/*.png
+artifacts/api-server/scratch/
+*.ics
+fetch_draft.mjs
+artifacts/api-server/fetch_draft.mjs
