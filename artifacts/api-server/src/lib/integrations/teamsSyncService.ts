@@ -144,17 +144,24 @@ export async function runTeamsSyncCycle(): Promise<SyncStatusResult> {
         }, "[TEAMS UNIVERSAL SYNC] New incoming message detected");
 
         // 5. Dynamic Workspace Resolution:
-        // Match which workspace this message is directed to
-        let targetWorkspace = allWorkspaces.find((w) => {
-          const emailLower = senderEmail.toLowerCase();
-          const nameLower = senderName.toLowerCase();
-          if (emailLower.includes("sunil") || nameLower.includes("sunil")) {
-            return w.name.toLowerCase().includes("sunil");
-          }
-          return w.name.toLowerCase().includes("deepak");
-        }) || allWorkspaces[0];
-
+        // Chats polled for Deepak's Microsoft account belong to Deepak's workspace.
+        let targetWorkspace = allWorkspaces.find((w) => w.name.toLowerCase().includes("deepak")) || allWorkspaces[0];
         const targetWorkspaceId = targetWorkspace?.id || "1a39970a-abf0-48c3-8b89-08b669e80bbe";
+
+        // Resolve sender email accurately from Graph message or display name
+        let resolvedSenderEmail = senderEmail;
+        if (!resolvedSenderEmail) {
+          const nameLower = senderName.toLowerCase();
+          if (nameLower.includes("deepak")) {
+            resolvedSenderEmail = "deepak.paranjape@kentplc.com";
+          } else if (nameLower.includes("sunil")) {
+            resolvedSenderEmail = "sunil.hiremath@kentplc.com";
+          } else if (nameLower.includes("samar")) {
+            resolvedSenderEmail = "samar@kentplc.com";
+          } else if (nameLower.includes("govind")) {
+            resolvedSenderEmail = "govind.hegde@kentplc.com";
+          }
+        }
 
         // Extract thread history
         const threadHistory = rawMsgs
@@ -171,7 +178,7 @@ export async function runTeamsSyncCycle(): Promise<SyncStatusResult> {
           chatId: chat.id,
           messageId: msg.id,
           senderName,
-          senderEmail: senderEmail || (senderName.toLowerCase().includes("sunil") ? "sunil.hiremath@kentplc.com" : "deepak.paranjape@kentplc.com"),
+          senderEmail: resolvedSenderEmail,
           chatType: chat.chatType === "oneOnOne" ? "personal_dm" : "group_chat",
           messageText: cleanText,
           isMentioned: true,

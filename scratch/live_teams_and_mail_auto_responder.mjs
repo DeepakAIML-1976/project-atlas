@@ -138,10 +138,15 @@ async function pollTeamsChats() {
       let replyText = '';
       let alreadyPosted = false;
       try {
-        const targetWsId = sender.toLowerCase().includes('sunil')
-          ? 'eb62cc6b-8b2c-457f-b515-7baecaf11d4f'
-          : '1a39970a-abf0-48c3-8b89-08b669e80bbe';
-        const targetSenderEmail = msg.from?.user?.email || (sender.toLowerCase().includes('sunil') ? 'sunil.hiremath@kentplc.com' : 'deepak.paranjape@kentplc.com');
+        const targetWsId = '1a39970a-abf0-48c3-8b89-08b669e80bbe';
+        let targetSenderEmail = msg.from?.user?.email;
+        if (!targetSenderEmail) {
+          const sLower = sender.toLowerCase();
+          if (sLower.includes('deepak')) targetSenderEmail = 'deepak.paranjape@kentplc.com';
+          else if (sLower.includes('sunil')) targetSenderEmail = 'sunil.hiremath@kentplc.com';
+          else if (sLower.includes('samar')) targetSenderEmail = 'samar@kentplc.com';
+          else if (sLower.includes('govind')) targetSenderEmail = 'govind.hegde@kentplc.com';
+        }
 
         const botRes = await fetch('http://localhost:5000/api/atlas/integrations/teams/chat/message', {
           method: 'POST',

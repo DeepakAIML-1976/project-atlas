@@ -7,6 +7,8 @@ import {
   atlasActionsTable,
   atlasChatDraftsTable,
   atlasTwinPreferencesTable,
+  atlasLinkedAccountsTable,
+  atlasWorkspacesTable,
 } from "@workspace/db";
 import { eq, and, desc } from "drizzle-orm";
 import { getLLMConfig } from "../atlasLLM.js";
@@ -39,28 +41,56 @@ export interface TeamsMessageResponse {
  * Real-world Microsoft Teams Chat Message Processor
  * 
  * Option 1: Executive Approval Workflow (Human-in-the-Loop)
+ * - Direct Owner Consultation: Owner asking their own twin in 1-on-1 DM -> Immediate verified reply to owner.
  * - If Owner is OFFLINE: Sends instant courtesy reply immediately, stages 4-pillar technical draft.
- * - If Owner is ONLINE: Stages 4-pillar technical draft, sends draft notification to Deepak in Teams for approval.
- * - If Deepak replies "Approve": Automatically authorizes and dispatches the staged draft to the recipient.
+ * - If Owner is ONLINE: Stages 4-pillar technical draft, sends draft notification to owner in Teams for approval.
+ * - If Owner replies "Approve": Automatically authorizes and dispatches the staged draft to the recipient.
  * - If Personal Message: Immediate corporate policy refusal.
  */
 export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promise<TeamsMessageResponse> {
   let workspaceId = msg.workspaceId && msg.workspaceId !== "default" ? msg.workspaceId : "";
   if (!workspaceId) {
     try {
-      const { atlasWorkspacesTable } = await import("@workspace/db");
       const allWs = await db.select().from(atlasWorkspacesTable);
-      if (msg.senderEmail) {
-        const emailLower = msg.senderEmail.toLowerCase();
-        const matched = allWs.find(w => emailLower.includes("sunil") ? w.name.toLowerCase().includes("sunil") : w.name.toLowerCase().includes("deepak"));
-        if (matched) workspaceId = matched.id;
-      }
-      if (!workspaceId && allWs.length > 0) {
+      if (allWs.length > 0) {
         const defaultWs = allWs.find(w => w.name.toLowerCase().includes("deepak")) || allWs[0];
         workspaceId = defaultWs.id;
       }
     } catch (_) {}
     if (!workspaceId) workspaceId = "1a39970a-abf0-48c3-8b89-08b669e80bbe";
+  }
+
+  // Load twin preferences and owner identity for this workspace
+  let workspaceOwnerEmail = "";
+  let isOwnerOnline = false;
+  let offlineCourtesy = "I am Deepak's AI Representative, my twin is currently offline, I will make sure your message is replied once he is online.";
+  let twinSignature = "Deepak's AI Representative";
+
+  try {
+    const prefs = await db
+      .select()
+      .from(atlasTwinPreferencesTable)
+      .where(eq(atlasTwinPreferencesTable.workspaceId, workspaceId))
+      .limit(1);
+    if (prefs.length > 0) {
+      workspaceOwnerEmail = prefs[0].ownerEmail?.toLowerCase() || "";
+      isOwnerOnline = Boolean(prefs[0].ownerIsOnline);
+      if (prefs[0].offlineCourtesyMessage) offlineCourtesy = prefs[0].offlineCourtesyMessage;
+      if (prefs[0].signature) twinSignature = prefs[0].signature;
+    }
+  } catch (_) {}
+
+  if (!workspaceOwnerEmail) {
+    try {
+      const linked = await db
+        .select()
+        .from(atlasLinkedAccountsTable)
+        .where(eq(atlasLinkedAccountsTable.workspaceId, workspaceId))
+        .limit(1);
+      if (linked.length > 0) {
+        workspaceOwnerEmail = linked[0].accountEmail?.toLowerCase() || "";
+      }
+    } catch (_) {}
   }
 
   // Check if message requires bot attention
@@ -78,18 +108,27 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
   logger.info({
     workspaceId,
     senderName: msg.senderName,
+    senderEmail: msg.senderEmail,
     chatType: msg.chatType,
     isMentioned: msg.isMentioned,
     isReply: msg.isReplyToDeepak,
     text: msg.messageText.slice(0, 50),
   }, "Processing incoming Teams chat message");
 
-  // 1. IN-TEAMS APPROVAL COMMAND: Check if this is an approval command from an authorized owner
-  const isFromOwner =
-    msg.senderEmail?.toLowerCase().includes("deepak") ||
-    msg.senderName.toLowerCase().includes("deepak") ||
-    msg.senderEmail?.toLowerCase().includes("sunil") ||
-    msg.senderName.toLowerCase().includes("sunil");
+  // Determine strictly if the sender is the actual owner of THIS workspace
+  const senderEmailLower = (msg.senderEmail || "").toLowerCase().trim();
+  const senderNameLower = (msg.senderName || "").toLowerCase().trim();
+  const ownerEmailLower = workspaceOwnerEmail.toLowerCase().trim();
+
+  const isFromOwner = Boolean(
+    (ownerEmailLower && senderEmailLower && senderEmailLower === ownerEmailLower) ||
+    (ownerEmailLower && senderEmailLower && ownerEmailLower.split("@")[0] === senderEmailLower.split("@")[0]) ||
+    (ownerEmailLower.includes("deepak") && (senderEmailLower.includes("deepak") || senderNameLower.includes("deepak"))) ||
+    (ownerEmailLower.includes("sunil") && (senderEmailLower.includes("sunil") || senderNameLower.includes("sunil"))) ||
+    (workspaceOwnerEmail && senderNameLower && workspaceOwnerEmail.includes(senderNameLower.split(" ")[0]))
+  );
+
+  // 1. IN-TEAMS APPROVAL COMMAND: Check if this is an approval command from the authorized owner
   const isApprovalCommand = isFromOwner && /^\s*(?:approve|authorize|yes|proceed)\b/i.test(msg.messageText.trim());
 
   if (isApprovalCommand) {
@@ -155,7 +194,7 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
         postedToTeams: true,
       };
     } else {
-      const noneText = `Deepak's AI Representative: There are no pending drafts awaiting authorization at this moment.`;
+      const noneText = `${twinSignature}: There are no pending drafts awaiting authorization at this moment.`;
       return {
         handled: true,
         shouldReply: true,
@@ -179,25 +218,6 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
   });
 
   const knowledgeBaseMatched = verification.category !== "personal";
-
-  // Load twin preferences for this workspace
-  let isOwnerOnline = false;
-  let offlineCourtesy = "I am Deepak's AI Representative, my twin is currently offline, I will make sure your message is replied once he is online.";
-  let twinSignature = "Deepak's AI Representative";
-
-  try {
-    const prefs = await db
-      .select()
-      .from(atlasTwinPreferencesTable)
-      .where(eq(atlasTwinPreferencesTable.workspaceId, workspaceId))
-      .limit(1);
-    if (prefs.length > 0) {
-      isOwnerOnline = Boolean(prefs[0].ownerIsOnline);
-      if (prefs[0].offlineCourtesyMessage) offlineCourtesy = prefs[0].offlineCourtesyMessage;
-      if (prefs[0].signature) twinSignature = prefs[0].signature;
-    }
-  } catch (_) {}
-
   const isPersonal = verification.category === "personal";
   let finalDispatchText = "";
   let shouldReplyImmediate = false;
@@ -209,7 +229,7 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
     shouldReplyImmediate = true;
   } else {
     // Technical / Project / Operations inquiry:
-    // Formulate 4-pillar verified technical draft and stage for approval
+    // Formulate 4-pillar verified technical draft
     const [draft] = await db
       .insert(atlasChatDraftsTable)
       .values({
@@ -224,25 +244,33 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
         confidence: 0.95,
         isLLMFallback: Boolean(verification.isLLMFallback),
         ownerPresenceAtArrival: isOwnerOnline ? "online" : "offline",
-        courtesyNoticeSent: !isOwnerOnline,
-        status: "pending_authorization",
+        courtesyNoticeSent: !isOwnerOnline && !isFromOwner,
+        status: isFromOwner && msg.chatType === "personal_dm" ? "sent" : "pending_authorization",
+        authorizedAt: isFromOwner && msg.chatType === "personal_dm" ? new Date() : undefined,
       })
       .returning();
     draftId = draft.id;
 
-    if (!isOwnerOnline) {
-      // Owner is OFFLINE:
+    if (isFromOwner && msg.chatType === "personal_dm") {
+      // Direct Owner Consultation:
+      // The workspace owner is consulting their digital twin directly in their 1-on-1 Teams chat.
+      // Reply immediately with the full 4-pillar verified technical evaluation!
+      finalDispatchText = verification.replyText;
+      shouldReplyImmediate = true;
+      logger.info({ draftId: draft.id }, "Direct owner consultation: Dispatched 4-pillar verified reply directly to owner in Teams");
+    } else if (!isOwnerOnline) {
+      // Colleague query while Owner is OFFLINE:
       // Send INSTANT courtesy reply to the colleague immediately:
       finalDispatchText = offlineCourtesy;
       shouldReplyImmediate = true;
-      logger.info({ draftId: draft.id }, "Owner is offline: Sent instant courtesy reply, staged 4-pillar technical draft for approval");
+      logger.info({ draftId: draft.id }, "Colleague message while owner is offline: Sent instant courtesy reply, staged 4-pillar technical draft for approval");
     } else {
-      // Owner is ONLINE (Option 1: Approval Workflow):
-      // Hold dispatch to colleague until Deepak approves!
+      // Colleague query while Owner is ONLINE (Option 1: Colleague Approval Workflow):
+      // Hold dispatch to colleague until owner approves!
       finalDispatchText = "";
       shouldReplyImmediate = false;
 
-      // Send draft reply notification to Deepak in Teams for approval:
+      // Send draft reply notification to owner in Teams for approval:
       try {
         const { sendMSGraphTeamsChatMessage } = await import("./msGraph");
         const ownerNotificationText = `🔔 [Digital Twin: New Draft Awaiting Approval]
@@ -261,7 +289,7 @@ ${verification.replyText}
         logger.warn({ err: notifErr?.message }, "Failed to deliver draft notification to owner in Teams");
       }
 
-      logger.info({ draftId: draft.id }, "Owner is online: Staged technical draft in Authorization Queue for owner review");
+      logger.info({ draftId: draft.id }, "Colleague message while owner is online: Staged technical draft in Authorization Queue for owner review");
     }
   }
 
