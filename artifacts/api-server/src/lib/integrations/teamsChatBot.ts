@@ -8,7 +8,7 @@ import {
   atlasChatDraftsTable,
   atlasTwinPreferencesTable,
 } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { eq, and, desc } from "drizzle-orm";
 import { getLLMConfig } from "../atlasLLM.js";
 import { logger } from "../logger";
 
@@ -38,14 +38,11 @@ export interface TeamsMessageResponse {
 /**
  * Real-world Microsoft Teams Chat Message Processor
  * 
- * Handles:
- * 1. @Mentions in Group Chats
- * 2. Replies to Deepak's messages in Group Threads
- * 3. 1-on-1 Personal Direct Messages (DMs)
- * 
- * Logic:
- * - Cross-references across 4 Pillars (Email DB, Chat DB, Knowledge Bank, Heuristics/LLM).
- * - Delivers grounded contextual replies with active signature.
+ * Option 1: Executive Approval Workflow (Human-in-the-Loop)
+ * - If Owner is OFFLINE: Sends instant courtesy reply immediately, stages 4-pillar technical draft.
+ * - If Owner is ONLINE: Stages 4-pillar technical draft, sends draft notification to Deepak in Teams for approval.
+ * - If Deepak replies "Approve": Automatically authorizes and dispatches the staged draft to the recipient.
+ * - If Personal Message: Immediate corporate policy refusal.
  */
 export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promise<TeamsMessageResponse> {
   const workspaceId = msg.workspaceId || "default";
@@ -70,7 +67,77 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
     text: msg.messageText.slice(0, 50),
   }, "Processing incoming Teams chat message");
 
-  // 1. Cross-reference across 4 Pillars (Email DB, Chat DB, Knowledge Bank, Heuristics)
+  // 1. IN-TEAMS APPROVAL COMMAND: Check if this is an approval command from Deepak
+  const isFromDeepak =
+    msg.senderEmail?.toLowerCase().includes("deepak") ||
+    msg.senderName.toLowerCase().includes("deepak");
+  const isApprovalCommand = isFromDeepak && /^\s*(?:approve|authorize|yes|proceed)\b/i.test(msg.messageText.trim());
+
+  if (isApprovalCommand) {
+    const idMatch = msg.messageText.match(/approve\s+([a-zA-Z0-9\-]+)/i);
+    let targetDraft = null;
+
+    if (idMatch && idMatch[1]) {
+      const found = await db
+        .select()
+        .from(atlasChatDraftsTable)
+        .where(eq(atlasChatDraftsTable.id, idMatch[1]))
+        .limit(1);
+      targetDraft = found[0];
+    }
+
+    if (!targetDraft) {
+      const pending = await db
+        .select()
+        .from(atlasChatDraftsTable)
+        .where(
+          and(
+            eq(atlasChatDraftsTable.workspaceId, workspaceId),
+            eq(atlasChatDraftsTable.status, "pending_authorization"),
+          ),
+        )
+        .orderBy(desc(atlasChatDraftsTable.createdAt))
+        .limit(1);
+      targetDraft = pending[0];
+    }
+
+    if (targetDraft) {
+      await db
+        .update(atlasChatDraftsTable)
+        .set({ status: "authorized", authorizedAt: new Date() })
+        .where(eq(atlasChatDraftsTable.id, targetDraft.id));
+
+      const { sendMSGraphTeamsChatMessage } = await import("./msGraph");
+      await sendMSGraphTeamsChatMessage(targetDraft.chatId, targetDraft.twinDraftResponse);
+
+      const confirmText = `✅ Approved: The response for ${targetDraft.senderName} has been authorized and dispatched to Microsoft Teams.`;
+      if (msg.chatId && msg.chatId !== targetDraft.chatId) {
+        await sendMSGraphTeamsChatMessage(msg.chatId, confirmText);
+      }
+
+      logger.info({ draftId: targetDraft.id, recipient: targetDraft.senderName }, "Owner approved draft in Teams: Dispatched to recipient");
+
+      return {
+        handled: true,
+        shouldReply: true,
+        replyText: confirmText,
+        knowledgeBaseMatched: true,
+        escalatedToInbox: false,
+        postedToTeams: true,
+      };
+    } else {
+      const noneText = `Deepak's AI Representative: There are no pending drafts awaiting authorization at this moment.`;
+      return {
+        handled: true,
+        shouldReply: true,
+        replyText: noneText,
+        knowledgeBaseMatched: false,
+        escalatedToInbox: false,
+      };
+    }
+  }
+
+  // 2. Cross-reference across 4 Pillars (Email DB, Chat DB, Knowledge Bank, Heuristics)
   const { verifyContextAndResolve } = await import("../contextVerificationEngine.js");
   const verification = await verifyContextAndResolve({
     workspaceId,
@@ -85,7 +152,7 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
   const knowledgeBaseMatched = verification.category !== "personal";
 
   // Load twin preferences for this workspace
-  let isOwnerOnline = true; // Default to online when owner is actively working
+  let isOwnerOnline = false;
   let offlineCourtesy = "I am Deepak's AI Representative, my twin is currently offline, I will make sure your message is replied once he is online.";
   let twinSignature = "Deepak's AI Representative";
 
@@ -113,21 +180,7 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
     shouldReplyImmediate = true;
   } else {
     // Technical / Project / Operations inquiry:
-    // When a 4-pillar verified contextual answer is formulated, always dispatch it!
-    const hasContextualReply = Boolean(verification.replyText && verification.replyText.trim());
-
-    if (hasContextualReply) {
-      finalDispatchText = verification.replyText;
-      shouldReplyImmediate = true;
-    } else if (!isOwnerOnline) {
-      // Only fall back to offline courtesy if no contextual answer could be formulated and owner is offline
-      finalDispatchText = offlineCourtesy;
-      shouldReplyImmediate = true;
-    } else {
-      finalDispatchText = `${twinSignature}: I have logged your message and notified Deepak.`;
-      shouldReplyImmediate = true;
-    }
-
+    // Formulate 4-pillar verified technical draft and stage for approval
     const [draft] = await db
       .insert(atlasChatDraftsTable)
       .values({
@@ -137,21 +190,50 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
         senderName: msg.senderName,
         senderEmail: msg.senderEmail,
         incomingMessage: msg.messageText,
-        twinDraftResponse: verification.replyText || finalDispatchText,
+        twinDraftResponse: verification.replyText,
         reasoning: verification.matchedContextSummary,
         confidence: 0.95,
         isLLMFallback: Boolean(verification.isLLMFallback),
         ownerPresenceAtArrival: isOwnerOnline ? "online" : "offline",
-        courtesyNoticeSent: !hasContextualReply && !isOwnerOnline,
-        status: shouldReplyImmediate ? "sent" : "pending_authorization",
+        courtesyNoticeSent: !isOwnerOnline,
+        status: "pending_authorization",
       })
       .returning();
     draftId = draft.id;
 
-    logger.info(
-      { draftId: draft.id, isOwnerOnline, shouldReplyImmediate, snippet: finalDispatchText.slice(0, 80) },
-      "Delivering 4-pillar verified AI representative response to Teams",
-    );
+    if (!isOwnerOnline) {
+      // Owner is OFFLINE:
+      // Send INSTANT courtesy reply to the colleague immediately:
+      finalDispatchText = offlineCourtesy;
+      shouldReplyImmediate = true;
+      logger.info({ draftId: draft.id }, "Owner is offline: Sent instant courtesy reply, staged 4-pillar technical draft for approval");
+    } else {
+      // Owner is ONLINE (Option 1: Approval Workflow):
+      // Hold dispatch to colleague until Deepak approves!
+      finalDispatchText = "";
+      shouldReplyImmediate = false;
+
+      // Send draft reply notification to Deepak in Teams for approval:
+      try {
+        const { sendMSGraphTeamsChatMessage } = await import("./msGraph");
+        const ownerNotificationText = `🔔 [Digital Twin: New Draft Awaiting Approval]
+From: ${msg.senderName} (${msg.chatType === "personal_dm" ? "1-on-1 DM" : "Group Chat"})
+Question: "${msg.messageText}"
+
+Proposed AI Draft Response:
+${verification.replyText}
+
+👉 Reply "Approve" in Teams or click Authorize in your Executive Inbox to dispatch.`;
+
+        const ownerChatId = process.env.TEAMS_OWNER_CHAT_ID || "19:65e796170c314bad991961548640a9aa@thread.v2";
+        await sendMSGraphTeamsChatMessage(ownerChatId, ownerNotificationText);
+        logger.info({ draftId: draft.id, ownerChatId }, "Sent draft review notification to owner in Teams");
+      } catch (notifErr: any) {
+        logger.warn({ err: notifErr?.message }, "Failed to deliver draft notification to owner in Teams");
+      }
+
+      logger.info({ draftId: draft.id }, "Owner is online: Staged technical draft in Authorization Queue for owner review");
+    }
   }
 
   // Live Teams Message Delivery: only post if immediate reply is permitted
