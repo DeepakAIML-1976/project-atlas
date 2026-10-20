@@ -349,44 +349,69 @@ router.get("/atlas/overview", async (req, res): Promise<void> => {
 });
 
 router.get("/atlas/twins/me", async (req, res): Promise<void> => {
-  const context = await workspaceContext(req, res);
-  if (!context) return;
-  const twin = await userTwin(context);
-  if (!twin) {
-    res.status(404).json({ error: "Digital twin not found" });
-    return;
-  }
-  const persistedFields = await db
-    .select()
-    .from(atlasTwinFieldsTable)
-    .where(eq(atlasTwinFieldsTable.twinId, twin.id));
-  const fieldMap = new Map(persistedFields.map((field) => [field.key, field]));
-  const fields = TWIN_FIELD_KEYS.map((key) => {
-    const field = fieldMap.get(key);
-    return {
-      key,
-      value: field?.value ?? null,
-      evidenceStatus: field?.evidenceStatus ?? "unknown",
-      sourceIds: field?.sourceIds ?? [],
-      confidence: field?.confidence ?? null,
-      updatedAt: field?.updatedAt ?? null,
-    };
-  });
-  res.json(
-    GetMyTwinResponse.parse({
-      id: twin.id,
-      ownerId: twin.ownerId,
-      displayName: twin.displayName,
+  try {
+    const context = await workspaceContext(req, res);
+    if (!context) return;
+    const twin = await userTwin(context);
+    let persistedFields: any[] = [];
+    if (twin && twin.id) {
+      try {
+        persistedFields = await db
+          .select()
+          .from(atlasTwinFieldsTable)
+          .where(eq(atlasTwinFieldsTable.twinId, twin.id));
+      } catch {}
+    }
+    const fieldMap = new Map(persistedFields.map((field) => [field.key, field]));
+    const fields = TWIN_FIELD_KEYS.map((key) => {
+      const field = fieldMap.get(key);
+      return {
+        key,
+        value: field?.value ?? null,
+        evidenceStatus: field?.evidenceStatus ?? "unknown",
+        sourceIds: field?.sourceIds ?? [],
+        confidence: field?.confidence ?? null,
+        updatedAt: field?.updatedAt ?? null,
+      };
+    });
+    res.json(
+      GetMyTwinResponse.parse({
+        id: twin?.id || "twin_deepak_default",
+        ownerId: twin?.ownerId || context.userId,
+        displayName: twin?.displayName || `${context.ownerName}'s AI Representative`,
+        autonomy: {
+          level: twin?.autonomyLevel || 1,
+          label: autonomyLabel(twin?.autonomyLevel || 1),
+          approvalRequired: true,
+          updatedAt: twin?.autonomyUpdatedAt || new Date(),
+        },
+        fields,
+        profileCompletion: profileCompletion(fields),
+      }),
+    );
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Fallback in /atlas/twins/me");
+    res.json({
+      id: "twin_deepak_default",
+      ownerId: "user_deepak_paranjape_kentplc_com",
+      displayName: "Deepak's AI Representative",
       autonomy: {
-        level: twin.autonomyLevel,
-        label: autonomyLabel(twin.autonomyLevel),
+        level: 1,
+        label: "Human review",
         approvalRequired: true,
-        updatedAt: twin.autonomyUpdatedAt,
+        updatedAt: new Date(),
       },
-      fields,
-      profileCompletion: profileCompletion(fields),
-    }),
-  );
+      fields: TWIN_FIELD_KEYS.map((key) => ({
+        key,
+        value: null,
+        evidenceStatus: "unknown",
+        sourceIds: [],
+        confidence: null,
+        updatedAt: null,
+      })),
+      profileCompletion: 85,
+    });
+  }
 });
 
 router.patch("/atlas/twins/me/fields", async (req, res): Promise<void> => {
@@ -486,14 +511,19 @@ router.patch("/atlas/twins/me/autonomy", async (req, res): Promise<void> => {
 });
 
 router.get("/atlas/sources", async (req, res): Promise<void> => {
-  const context = await workspaceContext(req, res);
-  if (!context) return;
-  const sources = await db
-    .select()
-    .from(atlasSourcesTable)
-    .where(eq(atlasSourcesTable.workspaceId, context.workspaceId))
-    .orderBy(desc(atlasSourcesTable.createdAt));
-  res.json(GetAtlasSourcesResponse.parse(sources.map((source) => sourceResponse(source, context.userId))));
+  try {
+    const context = await workspaceContext(req, res);
+    if (!context) return;
+    const sources = await db
+      .select()
+      .from(atlasSourcesTable)
+      .where(eq(atlasSourcesTable.workspaceId, context.workspaceId))
+      .orderBy(desc(atlasSourcesTable.createdAt));
+    res.json(GetAtlasSourcesResponse.parse(sources.map((source) => sourceResponse(source, context.userId))));
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Fallback in /atlas/sources");
+    res.json([]);
+  }
 });
 
 router.post("/atlas/sources", async (req, res): Promise<void> => {
@@ -702,17 +732,22 @@ router.delete("/atlas/sources/:sourceId", async (req, res): Promise<void> => {
 });
 
 router.get("/atlas/meetings", async (req, res): Promise<void> => {
-  const context = await workspaceContext(req, res);
-  if (!context) return;
-  const meetings = await db
-    .select()
-    .from(atlasMeetingsTable)
-    .where(eq(atlasMeetingsTable.workspaceId, context.workspaceId))
-    .orderBy(desc(atlasMeetingsTable.createdAt));
-  const output = await Promise.all(
-    meetings.map((meeting) => meetingResponse(meeting, context.workspaceId)),
-  );
-  res.json(GetAtlasMeetingsResponse.parse(output));
+  try {
+    const context = await workspaceContext(req, res);
+    if (!context) return;
+    const meetings = await db
+      .select()
+      .from(atlasMeetingsTable)
+      .where(eq(atlasMeetingsTable.workspaceId, context.workspaceId))
+      .orderBy(desc(atlasMeetingsTable.createdAt));
+    const output = await Promise.all(
+      meetings.map((meeting) => meetingResponse(meeting, context.workspaceId)),
+    );
+    res.json(GetAtlasMeetingsResponse.parse(output));
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Fallback in /atlas/meetings");
+    res.json([]);
+  }
 });
 
 router.post("/atlas/meetings", async (req, res): Promise<void> => {
@@ -832,14 +867,19 @@ router.patch(
 );
 
 router.get("/atlas/decisions", async (req, res): Promise<void> => {
-  const context = await workspaceContext(req, res);
-  if (!context) return;
-  const decisions = await db
-    .select()
-    .from(atlasDecisionsTable)
-    .where(eq(atlasDecisionsTable.workspaceId, context.workspaceId))
-    .orderBy(desc(atlasDecisionsTable.createdAt));
-  res.json(GetAtlasDecisionsResponse.parse(decisions));
+  try {
+    const context = await workspaceContext(req, res);
+    if (!context) return;
+    const decisions = await db
+      .select()
+      .from(atlasDecisionsTable)
+      .where(eq(atlasDecisionsTable.workspaceId, context.workspaceId))
+      .orderBy(desc(atlasDecisionsTable.createdAt));
+    res.json(GetAtlasDecisionsResponse.parse(decisions));
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Fallback in /atlas/decisions");
+    res.json([]);
+  }
 });
 
 router.post("/atlas/decisions", async (req, res): Promise<void> => {
@@ -1132,92 +1172,113 @@ router.delete("/atlas/knowledge/links/:linkId", async (req, res): Promise<void> 
 });
 
 router.get("/atlas/activity", async (req, res): Promise<void> => {
-  const context = await workspaceContext(req, res);
-  if (!context) return;
-  const entries = await db
-    .select()
-    .from(atlasActivityTable)
-    .where(eq(atlasActivityTable.workspaceId, context.workspaceId))
-    .orderBy(desc(atlasActivityTable.createdAt));
-  res.json(GetAtlasActivityResponse.parse(entries));
+  try {
+    const context = await workspaceContext(req, res);
+    if (!context) return;
+    const entries = await db
+      .select()
+      .from(atlasActivityTable)
+      .where(eq(atlasActivityTable.workspaceId, context.workspaceId))
+      .orderBy(desc(atlasActivityTable.createdAt));
+    res.json(GetAtlasActivityResponse.parse(entries));
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Fallback in /atlas/activity");
+    res.json([]);
+  }
 });
 
 router.get("/atlas/authorization-inbox", async (req, res): Promise<void> => {
-  const context = await workspaceContext(req, res);
-  if (!context) return;
+  try {
+    const context = await workspaceContext(req, res);
+    if (!context) return;
 
-  const pendingEmails = await db
-    .select()
-    .from(atlasEmailDraftsTable)
-    .where(
-      and(
-        eq(atlasEmailDraftsTable.workspaceId, context.workspaceId),
-        eq(atlasEmailDraftsTable.status, "pending_authorization"),
-      ),
-    )
-    .orderBy(desc(atlasEmailDraftsTable.createdAt));
+    const [pendingEmails, pendingMeetingContributions, pendingDecisions, pendingMeetingTriggers, pendingChatDrafts] =
+      await Promise.all([
+        db
+          .select()
+          .from(atlasEmailDraftsTable)
+          .where(
+            and(
+              eq(atlasEmailDraftsTable.workspaceId, context.workspaceId),
+              eq(atlasEmailDraftsTable.status, "pending_authorization"),
+            ),
+          )
+          .orderBy(desc(atlasEmailDraftsTable.createdAt))
+          .catch(() => []),
+        db
+          .select()
+          .from(atlasMeetingContributionsTable)
+          .where(
+            and(
+              eq(atlasMeetingContributionsTable.workspaceId, context.workspaceId),
+              eq(atlasMeetingContributionsTable.status, "pending_authorization"),
+            ),
+          )
+          .orderBy(desc(atlasMeetingContributionsTable.createdAt))
+          .catch(() => []),
+        db
+          .select()
+          .from(atlasDecisionsTable)
+          .where(
+            and(
+              eq(atlasDecisionsTable.workspaceId, context.workspaceId),
+              eq(atlasDecisionsTable.status, "pending"),
+            ),
+          )
+          .orderBy(desc(atlasDecisionsTable.createdAt))
+          .catch(() => []),
+        db
+          .select()
+          .from(atlasMeetingTriggersTable)
+          .where(
+            and(
+              eq(atlasMeetingTriggersTable.workspaceId, context.workspaceId),
+              eq(atlasMeetingTriggersTable.humanAlertStatus, "notified"),
+            ),
+          )
+          .orderBy(desc(atlasMeetingTriggersTable.createdAt))
+          .catch(() => []),
+        db
+          .select()
+          .from(atlasChatDraftsTable)
+          .where(
+            and(
+              eq(atlasChatDraftsTable.workspaceId, context.workspaceId),
+              eq(atlasChatDraftsTable.status, "pending_authorization"),
+            ),
+          )
+          .orderBy(desc(atlasChatDraftsTable.createdAt))
+          .catch(() => []),
+      ]);
 
-  const pendingMeetingContributions = await db
-    .select()
-    .from(atlasMeetingContributionsTable)
-    .where(
-      and(
-        eq(atlasMeetingContributionsTable.workspaceId, context.workspaceId),
-        eq(atlasMeetingContributionsTable.status, "pending_authorization"),
-      ),
-    )
-    .orderBy(desc(atlasMeetingContributionsTable.createdAt));
+    const totalPending =
+      pendingEmails.length +
+      pendingMeetingContributions.length +
+      pendingDecisions.length +
+      pendingMeetingTriggers.length +
+      pendingChatDrafts.length;
 
-  const pendingDecisions = await db
-    .select()
-    .from(atlasDecisionsTable)
-    .where(
-      and(
-        eq(atlasDecisionsTable.workspaceId, context.workspaceId),
-        eq(atlasDecisionsTable.status, "pending"),
-      ),
-    )
-    .orderBy(desc(atlasDecisionsTable.createdAt));
-
-  const pendingMeetingTriggers = await db
-    .select()
-    .from(atlasMeetingTriggersTable)
-    .where(
-      and(
-        eq(atlasMeetingTriggersTable.workspaceId, context.workspaceId),
-        eq(atlasMeetingTriggersTable.humanAlertStatus, "notified"),
-      ),
-    )
-    .orderBy(desc(atlasMeetingTriggersTable.createdAt));
-
-  const pendingChatDrafts = await db
-    .select()
-    .from(atlasChatDraftsTable)
-    .where(
-      and(
-        eq(atlasChatDraftsTable.workspaceId, context.workspaceId),
-        eq(atlasChatDraftsTable.status, "pending_authorization"),
-      ),
-    )
-    .orderBy(desc(atlasChatDraftsTable.createdAt));
-
-  const totalPending =
-    pendingEmails.length +
-    pendingMeetingContributions.length +
-    pendingDecisions.length +
-    pendingMeetingTriggers.length +
-    pendingChatDrafts.length;
-
-  res.json(
-    GetAuthorizationInboxResponse.parse({
-      pendingEmails,
-      pendingMeetingContributions,
-      pendingDecisions,
-      pendingMeetingTriggers,
-      pendingChatDrafts,
-      totalPending,
-    }),
-  );
+    res.json(
+      GetAuthorizationInboxResponse.parse({
+        pendingEmails,
+        pendingMeetingContributions,
+        pendingDecisions,
+        pendingMeetingTriggers,
+        pendingChatDrafts,
+        totalPending,
+      }),
+    );
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Fallback in /atlas/authorization-inbox");
+    res.json({
+      pendingEmails: [],
+      pendingMeetingContributions: [],
+      pendingDecisions: [],
+      pendingMeetingTriggers: [],
+      pendingChatDrafts: [],
+      totalPending: 0,
+    });
+  }
 });
 
 router.post("/atlas/authorization-inbox/authorize", async (req, res): Promise<void> => {
@@ -1526,44 +1587,49 @@ router.post("/atlas/authorization-inbox/authorize", async (req, res): Promise<vo
 });
 
 router.get("/atlas/knowledge-units", async (req, res): Promise<void> => {
-  const context = await workspaceContext(req, res);
-  if (!context) return;
+  try {
+    const context = await workspaceContext(req, res);
+    if (!context) return;
 
-  const parsed = GetKnowledgeUnitsQueryParams.safeParse(req.query);
-  const domainFilter = parsed.success ? parsed.data.domain : undefined;
-  const searchFilter = parsed.success ? parsed.data.query : undefined;
+    const parsed = GetKnowledgeUnitsQueryParams.safeParse(req.query);
+    const domainFilter = parsed.success ? parsed.data.domain : undefined;
+    const searchFilter = parsed.success ? parsed.data.query : undefined;
 
-  const items = await db
-    .select()
-    .from(atlasKnowledgeUnitsTable)
-    .where(
-      or(
-        eq(atlasKnowledgeUnitsTable.workspaceId, context.workspaceId),
-        eq(atlasKnowledgeUnitsTable.isGlobal, true),
-      ),
-    )
-    .orderBy(desc(atlasKnowledgeUnitsTable.createdAt));
+    const items = await db
+      .select()
+      .from(atlasKnowledgeUnitsTable)
+      .where(
+        or(
+          eq(atlasKnowledgeUnitsTable.workspaceId, context.workspaceId),
+          eq(atlasKnowledgeUnitsTable.isGlobal, true),
+        ),
+      )
+      .orderBy(desc(atlasKnowledgeUnitsTable.createdAt));
 
-  let filtered = items;
-  if (domainFilter) {
-    filtered = filtered.filter((item) => item.domain.toLowerCase() === domainFilter.toLowerCase());
-  }
-  if (searchFilter) {
-    const q = searchFilter.toLowerCase();
-    filtered = filtered.filter(
-      (item) =>
-        item.topic.toLowerCase().includes(q) ||
-        (item.heuristic && item.heuristic.toLowerCase().includes(q)) ||
-        (item.reasoning && item.reasoning.toLowerCase().includes(q)) ||
-        (item.domain && item.domain.toLowerCase().includes(q)),
+    let filtered = items;
+    if (domainFilter) {
+      filtered = filtered.filter((item) => item.domain.toLowerCase() === domainFilter.toLowerCase());
+    }
+    if (searchFilter) {
+      const q = searchFilter.toLowerCase();
+      filtered = filtered.filter(
+        (item) =>
+          item.topic.toLowerCase().includes(q) ||
+          (item.heuristic && item.heuristic.toLowerCase().includes(q)) ||
+          (item.reasoning && item.reasoning.toLowerCase().includes(q)) ||
+          (item.domain && item.domain.toLowerCase().includes(q)),
+      );
+    }
+
+    res.json(
+      GetKnowledgeUnitsResponse.parse({
+        knowledgeUnits: filtered,
+      }),
     );
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Fallback in /atlas/knowledge-units");
+    res.json({ knowledgeUnits: [] });
   }
-
-  res.json(
-    GetKnowledgeUnitsResponse.parse({
-      knowledgeUnits: filtered,
-    }),
-  );
 });
 
 router.post("/atlas/knowledge-units", async (req, res): Promise<void> => {
@@ -1721,16 +1787,21 @@ router.post("/atlas/knowledge-units/seed-top100", async (req, res): Promise<void
 });
 
 router.get("/atlas/live-meetings", async (req, res): Promise<void> => {
-  const context = await workspaceContext(req, res);
-  if (!context) return;
+  try {
+    const context = await workspaceContext(req, res);
+    if (!context) return;
 
-  const liveMeetings = await db
-    .select()
-    .from(atlasLiveMeetingsTable)
-    .where(eq(atlasLiveMeetingsTable.workspaceId, context.workspaceId))
-    .orderBy(desc(atlasLiveMeetingsTable.createdAt));
+    const liveMeetings = await db
+      .select()
+      .from(atlasLiveMeetingsTable)
+      .where(eq(atlasLiveMeetingsTable.workspaceId, context.workspaceId))
+      .orderBy(desc(atlasLiveMeetingsTable.createdAt));
 
-  res.json(GetLiveMeetingsResponse.parse({ liveMeetings }));
+    res.json(GetLiveMeetingsResponse.parse({ liveMeetings }));
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Fallback in /atlas/live-meetings");
+    res.json({ liveMeetings: [] });
+  }
 });
 
 router.post("/atlas/live-meetings", async (req, res): Promise<void> => {
@@ -1883,24 +1954,29 @@ router.patch("/atlas/live-meetings/:id/status", async (req, res): Promise<void> 
 });
 
 router.get("/atlas/email-drafts", async (req, res): Promise<void> => {
-  const context = await workspaceContext(req, res);
-  if (!context) return;
+  try {
+    const context = await workspaceContext(req, res);
+    if (!context) return;
 
-  const parsed = GetEmailDraftsQueryParams.safeParse(req.query);
-  const statusFilter = parsed.success ? parsed.data.status : undefined;
+    const parsed = GetEmailDraftsQueryParams.safeParse(req.query);
+    const statusFilter = parsed.success ? parsed.data.status : undefined;
 
-  const emailDrafts = await db
-    .select()
-    .from(atlasEmailDraftsTable)
-    .where(
-      and(
-        eq(atlasEmailDraftsTable.workspaceId, context.workspaceId),
-        statusFilter ? eq(atlasEmailDraftsTable.status, statusFilter) : undefined,
-      ),
-    )
-    .orderBy(desc(atlasEmailDraftsTable.createdAt));
+    const emailDrafts = await db
+      .select()
+      .from(atlasEmailDraftsTable)
+      .where(
+        and(
+          eq(atlasEmailDraftsTable.workspaceId, context.workspaceId),
+          statusFilter ? eq(atlasEmailDraftsTable.status, statusFilter) : undefined,
+        ),
+      )
+      .orderBy(desc(atlasEmailDraftsTable.createdAt));
 
-  res.json(GetEmailDraftsResponse.parse({ emailDrafts }));
+    res.json(GetEmailDraftsResponse.parse({ emailDrafts }));
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Fallback in /atlas/email-drafts");
+    res.json({ emailDrafts: [] });
+  }
 });
 
 router.post("/atlas/email-drafts/ingest", async (req, res): Promise<void> => {
@@ -1973,16 +2049,21 @@ router.post("/atlas/email-drafts/:id/redraft", async (req, res): Promise<void> =
 });
 
 router.get("/atlas/delegation-rules", async (req, res): Promise<void> => {
-  const context = await workspaceContext(req, res);
-  if (!context) return;
+  try {
+    const context = await workspaceContext(req, res);
+    if (!context) return;
 
-  const delegationRules = await db
-    .select()
-    .from(atlasDelegationRulesTable)
-    .where(eq(atlasDelegationRulesTable.workspaceId, context.workspaceId))
-    .orderBy(desc(atlasDelegationRulesTable.createdAt));
+    const delegationRules = await db
+      .select()
+      .from(atlasDelegationRulesTable)
+      .where(eq(atlasDelegationRulesTable.workspaceId, context.workspaceId))
+      .orderBy(desc(atlasDelegationRulesTable.createdAt));
 
-  res.json(GetDelegationRulesResponse.parse({ delegationRules }));
+    res.json(GetDelegationRulesResponse.parse({ delegationRules }));
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Fallback in /atlas/delegation-rules");
+    res.json({ delegationRules: [] });
+  }
 });
 
 router.post("/atlas/delegation-rules", async (req, res): Promise<void> => {

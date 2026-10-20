@@ -5,20 +5,7 @@ import * as schema from "./schema";
 const { Pool } = pg;
 
 function parseConnectionStringToPgConfig(rawUrl: string): pg.PoolConfig {
-  let cleaned = rawUrl.trim().replace(/^["']|["']$/g, "");
-
-  // Supabase direct host (db.<project-ref>.supabase.co) only resolves to IPv6.
-  // Render and other cloud platforms do not support outbound IPv6 on free/shared tiers.
-  // Automatically rewrite to the dual-stack IPv4 Supabase pooler host for this project.
-  const supabaseDirectMatch = cleaned.match(/db\.([a-z0-9]+)\.supabase\.co/);
-  if (supabaseDirectMatch) {
-    const projectRef = supabaseDirectMatch[1];
-    cleaned = cleaned
-      .replace(new RegExp(`db\\.${projectRef}\\.supabase\\.co(:\\d+)?`), "aws-0-ap-northeast-1.pooler.supabase.com:6543");
-    if (!cleaned.includes(`postgres.${projectRef}:`)) {
-      cleaned = cleaned.replace("postgres:", `postgres.${projectRef}:`);
-    }
-  }
+  const cleaned = rawUrl.trim().replace(/^["']|["']$/g, "");
 
   const isLocal =
     cleaned.includes("localhost") ||
@@ -28,60 +15,65 @@ function parseConnectionStringToPgConfig(rawUrl: string): pg.PoolConfig {
   const isCloud = !isLocal;
   const sslConfig = isCloud ? { rejectUnauthorized: false } : undefined;
 
-  // First try regex parsing to handle unencoded special characters in password like '#', '?', '@', etc.
-  const match = cleaned.match(/^(postgres(?:ql)?:\/\/)([^:]+):(.*)@([^:\/\?]+)(?::(\d+))?\/(.+)$/);
-  if (match) {
-    let [, , user, pass, host, portStr, dbAndParams] = match;
-    const dbName = dbAndParams.split("?")[0];
+  let host = "";
+  let port = 5432;
+  let user = "";
+  let password = "";
+  let database = "postgres";
 
-    // Extra safeguard: if host is still db.<ref>.supabase.co
+  // First try regex parsing to handle unencoded special characters in password like '#', '?', '@', etc.
+  const match = cleaned.match(/^(?:postgres(?:ql)?:\/\/)([^:]+):(.*)@([^:\/\?]+)(?::(\d+))?\/(.+)$/);
+  if (match) {
+    const [, u, p, h, portStr, dbAndParams] = match;
+    user = decodeURIComponent(u);
+    password = decodeURIComponent(p);
+    host = h;
+    port = portStr ? parseInt(portStr, 10) : 5432;
+    database = dbAndParams.split("?")[0] || "postgres";
+  } else {
+    try {
+      const parsed = new URL(cleaned);
+      if (parsed.hostname) {
+        host = parsed.hostname;
+        port = parsed.port ? parseInt(parsed.port, 10) : 5432;
+        user = decodeURIComponent(parsed.username);
+        password = decodeURIComponent(parsed.password);
+        database = parsed.pathname ? parsed.pathname.replace(/^\//, "") : "postgres";
+      }
+    } catch {}
+  }
+
+  if (host) {
+    // Check if host is a Supabase direct host (db.<project-ref>.supabase.co)
+    // Supabase direct host only has IPv6 AAAA records.
+    // Cloud environments (Render, AWS VPC IPv4) cannot connect via IPv6.
+    // Automatically rewrite to the dual-stack IPv4 Supabase pooler host and format user with tenant ref.
     const directMatch = host.match(/^db\.([a-z0-9]+)\.supabase\.co$/);
     if (directMatch) {
+      const projectRef = directMatch[1];
       host = "aws-0-ap-northeast-1.pooler.supabase.com";
-      portStr = "6543";
-      if (!user.includes(".")) user = `postgres.${directMatch[1]}`;
+      port = 6543;
+      if (!user.includes(".")) {
+        user = `${user}.${projectRef}`;
+      }
+    } else if (host.includes("pooler.supabase.com")) {
+      // If host is already pooler, ensure user includes the project ref
+      if (!user.includes(".")) {
+        user = `${user}.fiqjwkaoowcfqbenqnxa`;
+      }
     }
 
     return {
-      host: host,
-      port: portStr ? parseInt(portStr, 10) : 5432,
-      user: decodeURIComponent(user),
-      password: decodeURIComponent(pass),
-      database: dbName,
+      host,
+      port,
+      user,
+      password,
+      database,
       ssl: sslConfig,
       connectionTimeoutMillis: 5000,
       idleTimeoutMillis: 30000,
       max: 10,
     };
-  }
-
-  // Fallback to standard URL parsing if hostname is valid
-  try {
-    const parsed = new URL(cleaned);
-    if (parsed.hostname) {
-      let host = parsed.hostname;
-      let port = parsed.port ? parseInt(parsed.port, 10) : 5432;
-      let user = decodeURIComponent(parsed.username);
-      const directMatch = host.match(/^db\.([a-z0-9]+)\.supabase\.co$/);
-      if (directMatch) {
-        host = "aws-0-ap-northeast-1.pooler.supabase.com";
-        port = 6543;
-        if (!user.includes(".")) user = `postgres.${directMatch[1]}`;
-      }
-      return {
-        host,
-        port,
-        user,
-        password: decodeURIComponent(parsed.password),
-        database: parsed.pathname ? parsed.pathname.replace(/^\//, "") : "postgres",
-        ssl: sslConfig,
-        connectionTimeoutMillis: 5000,
-        idleTimeoutMillis: 30000,
-        max: 10,
-      };
-    }
-  } catch {
-    // Ignore and fallback
   }
 
   return {

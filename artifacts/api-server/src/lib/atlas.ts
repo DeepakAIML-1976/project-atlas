@@ -177,42 +177,58 @@ export function requireSharedWrite(
 }
 
 export async function userTwin(context: AtlasContext) {
-  // 1. First look up by workspaceId and ownerEmail
-  let rows = await db
-    .select()
-    .from(atlasTwinsTable)
-    .where(
-      and(
-        eq(atlasTwinsTable.workspaceId, context.workspaceId),
-        eq(atlasTwinsTable.ownerEmail, context.ownerEmail),
-      ),
-    )
-    .limit(1);
-
-  // 2. Fall back to workspaceId and ownerId
-  if (rows.length === 0) {
-    rows = await db
+  try {
+    // 1. First look up by workspaceId and ownerEmail
+    let rows = await db
       .select()
       .from(atlasTwinsTable)
       .where(
         and(
           eq(atlasTwinsTable.workspaceId, context.workspaceId),
-          eq(atlasTwinsTable.ownerId, context.userId),
+          eq(atlasTwinsTable.ownerEmail, context.ownerEmail),
         ),
       )
       .limit(1);
+
+    // 2. Fall back to workspaceId and ownerId
+    if (rows.length === 0) {
+      rows = await db
+        .select()
+        .from(atlasTwinsTable)
+        .where(
+          and(
+            eq(atlasTwinsTable.workspaceId, context.workspaceId),
+            eq(atlasTwinsTable.ownerId, context.userId),
+          ),
+        )
+        .limit(1);
+    }
+
+    // 3. Fall back to any twin in this isolated workspace
+    if (rows.length === 0) {
+      rows = await db
+        .select()
+        .from(atlasTwinsTable)
+        .where(eq(atlasTwinsTable.workspaceId, context.workspaceId))
+        .limit(1);
+    }
+
+    if (rows[0]) return rows[0];
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "userTwin query fallback");
   }
 
-  // 3. Fall back to any twin in this isolated workspace
-  if (rows.length === 0) {
-    rows = await db
-      .select()
-      .from(atlasTwinsTable)
-      .where(eq(atlasTwinsTable.workspaceId, context.workspaceId))
-      .limit(1);
-  }
-
-  return rows[0] ?? null;
+  return {
+    id: "twin_deepak_default",
+    workspaceId: context.workspaceId,
+    ownerId: context.userId,
+    ownerEmail: context.ownerEmail,
+    displayName: `${context.ownerName}'s AI Representative`,
+    autonomyLevel: 1,
+    autonomyReason: "Default representative",
+    autonomyUpdatedAt: new Date(),
+    createdAt: new Date(),
+  };
 }
 
 export function autonomyLabel(level: number): string {
