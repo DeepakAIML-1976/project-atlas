@@ -3,6 +3,7 @@ import path from "path";
 import { eq } from "drizzle-orm";
 import { db, atlasEmailDraftsTable, atlasLiveMeetingsTable } from "@workspace/db";
 import { processIncomingEmail } from "../atlasEmailIngest.js";
+import { logger } from "../logger.js";
 
 export interface MSGraphConfig {
   clientId?: string;
@@ -122,6 +123,7 @@ export function cleanEmailBody(rawContent: string, bodyPreview?: string): string
 export async function fetchLiveOutlookEmails(
   workspaceId: string,
   userId: string,
+  targetEmail?: string,
   config: MSGraphConfig = getMSGraphConfig(),
 ) {
   const token = await resolveMSGraphToken(config);
@@ -135,8 +137,13 @@ export async function fetchLiveOutlookEmails(
   }
 
   try {
-    const userTarget = getEnvValue("MS_GRAPH_USER_EMAIL") || getEnvValue("MS_GRAPH_USER_ID") || "DeepakParanjape@DPEngineeringservices.onmicrosoft.com";
-    const response = await fetch(
+    const userTarget =
+      targetEmail?.trim() ||
+      getEnvValue("MS_GRAPH_USER_EMAIL") ||
+      getEnvValue("MS_GRAPH_USER_ID") ||
+      "DeepakParanjape@DPEngineeringservices.onmicrosoft.com";
+
+    let response = await fetch(
       `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(userTarget)}/mailFolders/inbox/messages?$top=15&$orderby=receivedDateTime desc`,
       {
         headers: {
@@ -146,6 +153,24 @@ export async function fetchLiveOutlookEmails(
         },
       },
     );
+
+    // If targetEmail is in a separate tenant/domain and returns 404, fallback to configured tenant user if available
+    if (!response.ok && targetEmail && targetEmail !== getEnvValue("MS_GRAPH_USER_EMAIL")) {
+      const fallbackTarget = getEnvValue("MS_GRAPH_USER_EMAIL") || "DeepakParanjape@DPEngineeringservices.onmicrosoft.com";
+      const fallbackRes = await fetch(
+        `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fallbackTarget)}/mailFolders/inbox/messages?$top=15&$orderby=receivedDateTime desc`,
+        {
+          headers: {
+            Authorization: `Bearer ${token}`,
+            Accept: "application/json",
+            Prefer: 'outlook.body-content-type="text"',
+          },
+        },
+      );
+      if (fallbackRes.ok) {
+        response = fallbackRes;
+      }
+    }
 
     if (!response.ok) {
       const errText = await response.text();
@@ -164,14 +189,19 @@ export async function fetchLiveOutlookEmails(
     };
 
     // Load existing drafts to deduplicate (avoid re-ingesting the exact same email)
-    const existingDrafts = await db
-      .select({ subject: atlasEmailDraftsTable.subject, sender: atlasEmailDraftsTable.sender })
-      .from(atlasEmailDraftsTable)
-      .where(eq(atlasEmailDraftsTable.workspaceId, workspaceId));
+    let existingKeys = new Set<string>();
+    try {
+      const existingDrafts = await db
+        .select({ subject: atlasEmailDraftsTable.subject, sender: atlasEmailDraftsTable.sender })
+        .from(atlasEmailDraftsTable)
+        .where(eq(atlasEmailDraftsTable.workspaceId, workspaceId));
 
-    const existingKeys = new Set(
-      existingDrafts.map((d) => `${(d.subject || "").trim().toLowerCase()}:::${(d.sender || "").trim().toLowerCase()}`),
-    );
+      existingKeys = new Set(
+        existingDrafts.map((d) => `${(d.subject || "").trim().toLowerCase()}:::${(d.sender || "").trim().toLowerCase()}`),
+      );
+    } catch (dbErr: any) {
+      logger.warn({ err: dbErr?.message }, "Deduplication query fallback in fetchLiveOutlookEmails");
+    }
 
     const ingestedDrafts = [];
     const messages = data.value ?? [];
@@ -191,9 +221,13 @@ export async function fetchLiveOutlookEmails(
       const rawBody = msg.body?.content || msg.bodyPreview || "";
       const incomingBody = cleanEmailBody(rawBody, msg.bodyPreview);
 
-      const draft = await processIncomingEmail(workspaceId, userId, sender, subject, incomingBody);
-      ingestedDrafts.push(draft);
-      existingKeys.add(key);
+      try {
+        const draft = await processIncomingEmail(workspaceId, userId, sender, subject, incomingBody);
+        ingestedDrafts.push(draft);
+        existingKeys.add(key);
+      } catch (ingestErr: any) {
+        logger.warn({ err: ingestErr?.message, subject, sender }, "Failed to process incoming email draft");
+      }
     }
 
     return {
@@ -204,7 +238,11 @@ export async function fetchLiveOutlookEmails(
       emails: ingestedDrafts,
     };
   } catch (err: any) {
-    return { success: false, error: err?.message || "Failed to query Microsoft Graph API" };
+    const detail = err?.cause?.message || err?.cause?.code || err?.detail || err?.code;
+    return {
+      success: false,
+      error: detail ? `${err?.message || "Error"} (${detail})` : (err?.message || "Failed to query Microsoft Graph API"),
+    };
   }
 }
 

@@ -8,6 +8,7 @@ import { fetchLiveZoomMeetings, getZoomConfig, handleZoomWebhookEvent } from "..
 import { syncAllLinkedAccounts } from "../lib/integrations/teamsCalendarSync";
 import { joinTeamsLiveCallMediaStream } from "../lib/integrations/teamsCallingBot";
 import { deployTeamsWebBrowserBot } from "../lib/integrations/teamsBrowserBot";
+import { logger } from "../lib/logger.js";
 
 const router: IRouter = Router();
 
@@ -149,12 +150,32 @@ router.post("/atlas/integrations/outlook/sync", async (req, res): Promise<void> 
   const ctx = await workspaceContext(req, res);
   if (!ctx) return;
 
+  const targetEmail = (req.body?.accountEmail || req.body?.targetEmail || ctx.ownerEmail)?.trim().toLowerCase();
+  logger.info({ workspaceId: ctx.workspaceId, userId: ctx.userId, targetEmail }, "Initiating Outlook email sync for workspace");
+
+  const count = Math.min(Number(req.body?.count) || 10, 25);
+  const sinceHours = Number(req.body?.sinceHours) || 48;
+  const unreadOnly = req.body?.unreadOnly !== false;
+
+  // On Windows (SME workstation with live desktop Outlook running):
+  if (process.platform === "win32") {
+    try {
+      const desktop = await syncOutlookDesktop(ctx.workspaceId, ctx.userId, { count, sinceHours, unreadOnly, targetEmail });
+      if (desktop.success && (desktop.drafted > 0 || desktop.scanned > 0)) {
+        res.json(desktop);
+        return;
+      }
+    } catch (desktopErr: any) {
+      logger.warn({ err: desktopErr?.message }, "Windows desktop Outlook sync attempted but fell through to Graph");
+    }
+  }
+
   const msGraph = getMSGraphConfig();
   const graphConfigured = Boolean(msGraph.accessToken || (msGraph.clientId && msGraph.clientSecret));
 
-  // Preferred: Microsoft Graph when the tenant has granted app access.
+  // Preferred in cloud / Render: Microsoft Graph when the tenant has granted app access
   if (graphConfigured) {
-    const result = await fetchLiveOutlookEmails(ctx.workspaceId, ctx.userId);
+    const result = await fetchLiveOutlookEmails(ctx.workspaceId, ctx.userId, targetEmail);
     if (result.success || !result.requiresSetup) {
       res.json(result);
       return;
@@ -162,10 +183,7 @@ router.post("/atlas/integrations/outlook/sync", async (req, res): Promise<void> 
   }
 
   // Fallback: signed-in Outlook desktop app (no admin consent needed). Draft-only.
-  const count = Math.min(Number(req.body?.count) || 10, 25);
-  const sinceHours = Number(req.body?.sinceHours) || 48;
-  const unreadOnly = req.body?.unreadOnly !== false;
-  const desktop = await syncOutlookDesktop(ctx.workspaceId, ctx.userId, { count, sinceHours, unreadOnly });
+  const desktop = await syncOutlookDesktop(ctx.workspaceId, ctx.userId, { count, sinceHours, unreadOnly, targetEmail });
   if (!desktop.success) {
     res.status(502).json(desktop);
     return;

@@ -22,22 +22,38 @@ function parseConnectionStringToPgConfig(rawUrl: string): pg.PoolConfig {
   let database = "postgres";
 
   // First try regex parsing to handle unencoded special characters in password like '#', '?', '@', etc.
-  const match = cleaned.match(/^(?:postgres(?:ql)?:\/\/)([^:]+):(.*)@([^:\/\?]+)(?::(\d+))?\/(.+)$/);
+  const match = cleaned.match(/^(?:postgres(?:ql)?:\/\/)([^:]+):(.*)@([^:\/\?]+)(?::(\d+))?(?:\/(.*))?$/);
   if (match) {
     const [, u, p, h, portStr, dbAndParams] = match;
-    user = decodeURIComponent(u);
-    password = decodeURIComponent(p);
+    try {
+      user = decodeURIComponent(u);
+    } catch {
+      user = u;
+    }
+    try {
+      password = decodeURIComponent(p);
+    } catch {
+      password = p;
+    }
     host = h;
     port = portStr ? parseInt(portStr, 10) : 5432;
-    database = dbAndParams.split("?")[0] || "postgres";
+    database = (dbAndParams || "postgres").split("?")[0] || "postgres";
   } else {
     try {
       const parsed = new URL(cleaned);
       if (parsed.hostname) {
         host = parsed.hostname;
         port = parsed.port ? parseInt(parsed.port, 10) : 5432;
-        user = decodeURIComponent(parsed.username);
-        password = decodeURIComponent(parsed.password);
+        try {
+          user = decodeURIComponent(parsed.username);
+        } catch {
+          user = parsed.username;
+        }
+        try {
+          password = decodeURIComponent(parsed.password);
+        } catch {
+          password = parsed.password;
+        }
         database = parsed.pathname ? parsed.pathname.replace(/^\//, "") : "postgres";
       }
     } catch {}
@@ -70,8 +86,8 @@ function parseConnectionStringToPgConfig(rawUrl: string): pg.PoolConfig {
       password,
       database,
       ssl: sslConfig,
-      connectionTimeoutMillis: 5000,
-      idleTimeoutMillis: 30000,
+      connectionTimeoutMillis: 15000,
+      idleTimeoutMillis: 60000,
       max: 10,
     };
   }
@@ -79,8 +95,8 @@ function parseConnectionStringToPgConfig(rawUrl: string): pg.PoolConfig {
   return {
     connectionString: cleaned,
     ssl: sslConfig,
-    connectionTimeoutMillis: 5000,
-    idleTimeoutMillis: 30000,
+    connectionTimeoutMillis: 15000,
+    idleTimeoutMillis: 60000,
     max: 10,
   };
 }

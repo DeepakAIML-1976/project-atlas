@@ -179,7 +179,15 @@ export function EmailInbox() {
               onClick={async () => {
                 try {
                   setIsSyncing(true);
-                  const res = await fetch('/api/atlas/integrations/outlook/sync', { method: 'POST' });
+                  const activeEmail = (typeof window !== 'undefined' ? localStorage.getItem('atlas_active_owner_email') : null) || 'deepak.paranjape@kentplc.com';
+                  const res = await fetch('/api/atlas/integrations/outlook/sync', {
+                    method: 'POST',
+                    headers: {
+                      'Content-Type': 'application/json',
+                      'X-Owner-Email': activeEmail,
+                    },
+                    body: JSON.stringify({ targetEmail: activeEmail }),
+                  });
                   const data = await res.json();
                   if (!res.ok || !data.success) {
                     alert(`Outlook Sync Notice:\n\n${data.error || 'Failed to sync with live Outlook.'}`);

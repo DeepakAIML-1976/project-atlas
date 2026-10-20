@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { privateFile } from "../lib/atlasStorage";
-import { and, desc, eq, ilike, isNull, or } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import {
   CreateAtlasDecisionBody,
   CreateAtlasDecisionResponse,
@@ -80,6 +80,7 @@ import {
   atlasDelegationRulesTable,
   atlasChatDraftsTable,
   db,
+  pool,
 } from "@workspace/db";
 import {
   autonomyLabel,
@@ -98,6 +99,43 @@ import { TOP_100_HEURISTICS } from "../lib/top100HeuristicsData";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
+
+router.get("/atlas/diag/db", async (req, res): Promise<void> => {
+  try {
+    const rawRes = await db.select({ count: sql`count(*)` }).from(atlasEmailDraftsTable);
+    res.json({
+      success: true,
+      count: rawRes[0]?.count,
+      poolConfig: {
+        host: (pool as any).options?.host,
+        port: (pool as any).options?.port,
+        user: (pool as any).options?.user,
+        database: (pool as any).options?.database,
+        ssl: Boolean((pool as any).options?.ssl),
+      },
+    });
+  } catch (err: any) {
+    res.status(500).json({
+      success: false,
+      error: err?.message,
+      cause: err?.cause ? {
+        message: err.cause.message,
+        code: err.cause.code,
+        detail: err.cause.detail,
+        hint: err.cause.hint,
+      } : null,
+      poolConfig: {
+        host: (pool as any).options?.host,
+        port: (pool as any).options?.port,
+        user: (pool as any).options?.user,
+        database: (pool as any).options?.database,
+        hasPassword: Boolean((pool as any).options?.password),
+        ssl: Boolean((pool as any).options?.ssl),
+      },
+    });
+  }
+});
+
 const recordTypes = ["source", "meeting", "decision"] as const;
 
 async function activity(

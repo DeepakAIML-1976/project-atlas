@@ -43,7 +43,7 @@ export async function syncAllLinkedAccounts(workspaceId: string, userId: string)
           meetingsSynced += teamsRes.count;
         }
 
-        const emailRes = await fetchLiveOutlookEmails(workspaceId, userId, customConfig);
+        const emailRes = await fetchLiveOutlookEmails(workspaceId, userId, acc.accountEmail, customConfig);
         if (emailRes.success && "count" in emailRes && typeof emailRes.count === "number") {
           emailsSynced += emailRes.count;
         }

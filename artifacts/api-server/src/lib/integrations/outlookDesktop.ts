@@ -29,9 +29,27 @@ $folderId = [int]$env:ATLAS_OL_FOLDER
 $count    = [int]$env:ATLAS_OL_COUNT
 $hours    = [int]$env:ATLAS_OL_HOURS
 $unread   = $env:ATLAS_OL_UNREAD -eq "1"
+$targetAccount = [string]$env:ATLAS_OL_ACCOUNT
+
 $ol = New-Object -ComObject Outlook.Application
 $ns = $ol.GetNamespace("MAPI")
-$items = $ns.GetDefaultFolder($folderId).Items
+
+$folder = $null
+if ($targetAccount) {
+  foreach ($f in $ns.Folders) {
+    if ($f.Name -like "*$targetAccount*") {
+      try {
+        $folder = if ($folderId -eq 5) { $f.Folders.Item("Sent Items") } else { $f.Folders.Item("Inbox") }
+        if ($folder) { break }
+      } catch { }
+    }
+  }
+}
+if (-not $folder) {
+  $folder = $ns.GetDefaultFolder($folderId)
+}
+
+$items = $folder.Items
 $prop = if ($folderId -eq 5) { "[SentOn]" } else { "[ReceivedTime]" }
 $items.Sort($prop, $true)
 $cutoff = (Get-Date).AddHours(-$hours)
@@ -65,6 +83,7 @@ function runOutlookRead(opts: {
   count: number;
   sinceHours: number;
   unreadOnly: boolean;
+  targetEmail?: string;
 }): Promise<DesktopMail[]> {
   return new Promise((resolve, reject) => {
     if (process.platform !== "win32") {
@@ -82,6 +101,7 @@ function runOutlookRead(opts: {
           ATLAS_OL_COUNT: String(opts.count),
           ATLAS_OL_HOURS: String(opts.sinceHours),
           ATLAS_OL_UNREAD: opts.unreadOnly ? "1" : "0",
+          ATLAS_OL_ACCOUNT: opts.targetEmail || "",
         },
         windowsHide: true,
       },
@@ -126,12 +146,12 @@ export async function isOutlookDesktopAvailable(): Promise<boolean> {
   }
 }
 
-export function readOutlookInbox(count = 10, sinceHours = 48, unreadOnly = false) {
-  return runOutlookRead({ folder: "inbox", count, sinceHours, unreadOnly });
+export function readOutlookInbox(count = 10, sinceHours = 48, unreadOnly = false, targetEmail?: string) {
+  return runOutlookRead({ folder: "inbox", count, sinceHours, unreadOnly, targetEmail });
 }
 
-export function readOutlookSent(count = 10, sinceHours = 0) {
-  return runOutlookRead({ folder: "sent", count, sinceHours, unreadOnly: false });
+export function readOutlookSent(count = 10, sinceHours = 0, targetEmail?: string) {
+  return runOutlookRead({ folder: "sent", count, sinceHours, unreadOnly: false, targetEmail });
 }
 
 /** Automated senders, newsletters, and marketing blasts that should never generate a reply draft. */
@@ -157,7 +177,7 @@ export interface DesktopSyncResult {
 export async function syncOutlookDesktop(
   workspaceId: string,
   userId: string,
-  opts: { count?: number; sinceHours?: number; unreadOnly?: boolean } = {},
+  opts: { count?: number; sinceHours?: number; unreadOnly?: boolean; targetEmail?: string } = {},
 ): Promise<DesktopSyncResult> {
   const result: DesktopSyncResult = {
     success: false,
@@ -170,13 +190,13 @@ export async function syncOutlookDesktop(
   };
 
   try {
-    const inbox = await readOutlookInbox(opts.count ?? 10, opts.sinceHours ?? 48, opts.unreadOnly ?? true);
+    const inbox = await readOutlookInbox(opts.count ?? 10, opts.sinceHours ?? 48, opts.unreadOnly ?? true, opts.targetEmail);
     result.scanned = inbox.length;
 
     // Real examples of how Deepak writes, used to match tone in drafts.
     let styleExamples: string[] = [];
     try {
-      const sent = await readOutlookSent(5, 0);
+      const sent = await readOutlookSent(5, 0, opts.targetEmail);
       styleExamples = sent.map((s) => s.body).filter((b) => b.length > 40).map((b) => b.slice(0, 600));
     } catch (err: any) {
       logger.warn({ err: err?.message }, "Could not load Sent Items for style context");
@@ -195,27 +215,40 @@ export async function syncOutlookDesktop(
       const subject = mail.subject || "No Subject";
       const body = mail.body || "";
 
-      const existing = await db
-        .select({ id: atlasEmailDraftsTable.id })
-        .from(atlasEmailDraftsTable)
-        .where(
-          and(
-            eq(atlasEmailDraftsTable.workspaceId, workspaceId),
-            eq(atlasEmailDraftsTable.sender, sender),
-            eq(atlasEmailDraftsTable.subject, subject),
-            eq(atlasEmailDraftsTable.incomingBody, body),
-          ),
-        )
-        .limit(1);
+      let isDuplicate = false;
+      try {
+        const existing = await db
+          .select({ id: atlasEmailDraftsTable.id })
+          .from(atlasEmailDraftsTable)
+          .where(
+            and(
+              eq(atlasEmailDraftsTable.workspaceId, workspaceId),
+              eq(atlasEmailDraftsTable.sender, sender),
+              eq(atlasEmailDraftsTable.subject, subject),
+              eq(atlasEmailDraftsTable.incomingBody, body),
+            ),
+          )
+          .limit(1);
 
-      if (existing.length > 0) {
+        if (existing.length > 0) {
+          isDuplicate = true;
+        }
+      } catch (dbErr: any) {
+        logger.warn({ err: dbErr?.message }, "Deduplication query fallback in syncOutlookDesktop");
+      }
+
+      if (isDuplicate) {
         result.skippedDuplicate++;
         continue;
       }
 
-      const draft = await processIncomingEmail(workspaceId, userId, sender, subject, body, styleExamples);
-      result.emails.push(draft);
-      result.drafted++;
+      try {
+        const draft = await processIncomingEmail(workspaceId, userId, sender, subject, body, styleExamples);
+        result.emails.push(draft);
+        result.drafted++;
+      } catch (ingestErr: any) {
+        logger.warn({ err: ingestErr?.message, subject, sender }, "Failed to process incoming email draft");
+      }
     }
 
     result.success = true;
