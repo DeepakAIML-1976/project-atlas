@@ -138,13 +138,16 @@ export async function fetchLiveOutlookEmails(
 
   try {
     const userTarget =
-      targetEmail?.trim() ||
+      targetEmail?.trim().toLowerCase() ||
       getEnvValue("MS_GRAPH_USER_EMAIL") ||
-      getEnvValue("MS_GRAPH_USER_ID") ||
-      "DeepakParanjape@DPEngineeringservices.onmicrosoft.com";
+      getEnvValue("MS_GRAPH_USER_ID");
 
-    let response = await fetch(
-      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(userTarget)}/mailFolders/inbox/messages?$top=15&$orderby=receivedDateTime desc`,
+    if (!userTarget) {
+      return { success: false, error: "No target user email configured for mailbox ingestion." };
+    }
+
+    const response = await fetch(
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(userTarget)}/mailFolders/inbox/messages?$top=25&$orderby=receivedDateTime desc`,
       {
         headers: {
           Authorization: `Bearer ${token}`,
@@ -154,27 +157,12 @@ export async function fetchLiveOutlookEmails(
       },
     );
 
-    // If targetEmail is in a separate tenant/domain and returns 404, fallback to configured tenant user if available
-    if (!response.ok && targetEmail && targetEmail !== getEnvValue("MS_GRAPH_USER_EMAIL")) {
-      const fallbackTarget = getEnvValue("MS_GRAPH_USER_EMAIL") || "DeepakParanjape@DPEngineeringservices.onmicrosoft.com";
-      const fallbackRes = await fetch(
-        `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(fallbackTarget)}/mailFolders/inbox/messages?$top=15&$orderby=receivedDateTime desc`,
-        {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            Accept: "application/json",
-            Prefer: 'outlook.body-content-type="text"',
-          },
-        },
-      );
-      if (fallbackRes.ok) {
-        response = fallbackRes;
-      }
-    }
-
     if (!response.ok) {
       const errText = await response.text();
-      return { success: false, error: `Microsoft Graph API error (${response.status}): ${errText}` };
+      return {
+        success: false,
+        error: `Microsoft Graph API error (${response.status}) for ${userTarget}: ${errText}`,
+      };
     }
 
     const data = (await response.json()) as {

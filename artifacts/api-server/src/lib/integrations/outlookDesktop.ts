@@ -30,17 +30,20 @@ $count    = [int]$env:ATLAS_OL_COUNT
 $hours    = [int]$env:ATLAS_OL_HOURS
 $unread   = $env:ATLAS_OL_UNREAD -eq "1"
 $targetAccount = [string]$env:ATLAS_OL_ACCOUNT
+$sinceDateStr  = [string]$env:ATLAS_OL_SINCE_DATE
 
 $ol = New-Object -ComObject Outlook.Application
 $ns = $ol.GetNamespace("MAPI")
 
 $folder = $null
 if ($targetAccount) {
+  # Exclude online archive and public folders to strictly pick the primary user mailbox
   foreach ($f in $ns.Folders) {
-    if ($f.Name -like "*$targetAccount*") {
+    $n = $f.Name
+    if ($n -notlike "*Online Archive*" -and $n -notlike "*Public Folders*" -and ($n -eq $targetAccount -or $n -like "*$targetAccount*" -or $targetAccount -like "*$n*")) {
       try {
-        $folder = if ($folderId -eq 5) { $f.Folders.Item("Sent Items") } else { $f.Folders.Item("Inbox") }
-        if ($folder) { break }
+        $targetFolder = if ($folderId -eq 5) { $f.Folders.Item("Sent Items") } else { $f.Folders.Item("Inbox") }
+        if ($targetFolder) { $folder = $targetFolder; break }
       } catch { }
     }
   }
@@ -52,14 +55,22 @@ if (-not $folder) {
 $items = $folder.Items
 $prop = if ($folderId -eq 5) { "[SentOn]" } else { "[ReceivedTime]" }
 $items.Sort($prop, $true)
-$cutoff = (Get-Date).AddHours(-$hours)
+
+$cutoff = $null
+if ($sinceDateStr) {
+  try { $cutoff = [DateTime]::Parse($sinceDateStr) } catch { }
+}
+if (-not $cutoff -and $hours -gt 0) {
+  $cutoff = (Get-Date).AddHours(-$hours)
+}
+
 $out = New-Object System.Collections.ArrayList
 foreach ($m in $items) {
-  if ($out.Count -ge $count) { break }
+  if ($count -gt 0 -and $out.Count -ge $count) { break }
   try {
     if ($m.Class -ne 43) { continue }
     $when = if ($folderId -eq 5) { $m.SentOn } else { $m.ReceivedTime }
-    if ($hours -gt 0 -and $when -lt $cutoff) { break }
+    if ($cutoff -and $when -lt $cutoff) { break }
     if ($unread -and -not $m.UnRead) { continue }
     $email = $m.SenderEmailAddress
     if ($m.SenderEmailType -eq "EX") {
@@ -82,6 +93,7 @@ function runOutlookRead(opts: {
   folder: "inbox" | "sent";
   count: number;
   sinceHours: number;
+  sinceDate?: string;
   unreadOnly: boolean;
   targetEmail?: string;
 }): Promise<DesktopMail[]> {
@@ -100,6 +112,7 @@ function runOutlookRead(opts: {
           ATLAS_OL_FOLDER: opts.folder === "sent" ? "5" : "6",
           ATLAS_OL_COUNT: String(opts.count),
           ATLAS_OL_HOURS: String(opts.sinceHours),
+          ATLAS_OL_SINCE_DATE: opts.sinceDate || "",
           ATLAS_OL_UNREAD: opts.unreadOnly ? "1" : "0",
           ATLAS_OL_ACCOUNT: opts.targetEmail || "",
         },
@@ -146,8 +159,14 @@ export async function isOutlookDesktopAvailable(): Promise<boolean> {
   }
 }
 
-export function readOutlookInbox(count = 10, sinceHours = 48, unreadOnly = false, targetEmail?: string) {
-  return runOutlookRead({ folder: "inbox", count, sinceHours, unreadOnly, targetEmail });
+export function readOutlookInbox(
+  count = 10,
+  sinceHours = 48,
+  unreadOnly = false,
+  targetEmail?: string,
+  sinceDate?: string,
+) {
+  return runOutlookRead({ folder: "inbox", count, sinceHours, sinceDate, unreadOnly, targetEmail });
 }
 
 export function readOutlookSent(count = 10, sinceHours = 0, targetEmail?: string) {
@@ -177,7 +196,7 @@ export interface DesktopSyncResult {
 export async function syncOutlookDesktop(
   workspaceId: string,
   userId: string,
-  opts: { count?: number; sinceHours?: number; unreadOnly?: boolean; targetEmail?: string } = {},
+  opts: { count?: number; sinceHours?: number; sinceDate?: string; unreadOnly?: boolean; targetEmail?: string } = {},
 ): Promise<DesktopSyncResult> {
   const result: DesktopSyncResult = {
     success: false,
@@ -190,7 +209,13 @@ export async function syncOutlookDesktop(
   };
 
   try {
-    const inbox = await readOutlookInbox(opts.count ?? 10, opts.sinceHours ?? 48, opts.unreadOnly ?? true, opts.targetEmail);
+    const inbox = await readOutlookInbox(
+      opts.count ?? 50,
+      opts.sinceHours ?? 0,
+      opts.unreadOnly ?? false,
+      opts.targetEmail,
+      opts.sinceDate ?? "2026-10-18T00:00:00",
+    );
     result.scanned = inbox.length;
 
     // Real examples of how Deepak writes, used to match tone in drafts.
@@ -207,7 +232,9 @@ export async function syncOutlookDesktop(
         ? `${mail.senderName} <${mail.senderEmail}>`
         : mail.senderName;
 
-      if (AUTOMATED_SENDER.test(sender) || AUTOMATED_SENDER.test(mail.senderName)) {
+      // Ensure critical EPC project / Aconex / RFI notifications are NOT skipped
+      const isProjectWorkflow = /aconex|bpo-w-btap|5884|5533/i.test(sender) || /5884|5533|alky|reactor/i.test(mail.subject || "");
+      if (!isProjectWorkflow && (AUTOMATED_SENDER.test(sender) || AUTOMATED_SENDER.test(mail.senderName))) {
         result.skippedAutomated++;
         continue;
       }

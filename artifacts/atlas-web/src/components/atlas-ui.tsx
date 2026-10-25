@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'wouter';
 import { Activity, ArrowUpRight, BookOpenText, Boxes, CalendarDays, ChevronRight, Compass, FileStack, Fingerprint, GitBranch, LayoutDashboard, LogOut, Mail, Scale, ShieldCheck, Sliders, Video, X } from 'lucide-react';
 import { useClerk } from '@clerk/react';
@@ -76,7 +77,27 @@ export function Empty({ icon:Icon = Boxes, title, description, action }: {icon?:
 export function Load({ count=3 }: {count?:number}) { return <div className="stack">{Array.from({length:count},(_,i)=><div className="skeleton skeleton-card" key={i}/>)}</div>; }
 export function ErrorState({retry}:{retry:()=>void}) { return <div className="error-card"><h3>We couldn’t load this part of your workspace.</h3><p>Your information hasn’t changed. Check your connection and try again.</p><button className="btn btn-outline" onClick={retry} data-testid="button-retry">Try again <ArrowUpRight size={14}/></button></div>; }
 export function Modal({title,subtitle,onClose,children}:{title:string;subtitle?:string;onClose:()=>void;children:ReactNode}) {
-  return <div className="dialog-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}><div className="dialog" role="dialog" aria-modal="true" aria-label={title}><div className="dialog-head"><div><div className="eyebrow">ATLAS / WORKSPACE</div><h2>{title}</h2>{subtitle&&<p style={{margin:0}}>{subtitle}</p>}</div><button className="icon-button" onClick={onClose} aria-label="Close dialog" data-testid="button-close-dialog"><X size={19}/></button></div>{children}</div></div>;
+  const node = (
+    <div className="dialog-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)onClose();}}>
+      <div className="dialog" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="dialog-head">
+          <div>
+            <div className="eyebrow">ATLAS / WORKSPACE</div>
+            <h2>{title}</h2>
+            {subtitle&&<p style={{margin:0}}>{subtitle}</p>}
+          </div>
+          <button className="icon-button" onClick={onClose} aria-label="Close dialog" data-testid="button-close-dialog">
+            <X size={19}/>
+          </button>
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+  if (typeof document !== 'undefined') {
+    return createPortal(node, document.body);
+  }
+  return node;
 }
 export const formatDate = (date?:string|null) => date ? new Date(date).toLocaleDateString(undefined,{year:'numeric',month:'short',day:'numeric'}) : 'Not set';
 export const displayKey = (key:string) => key.replace(/([A-Z])/g,' $1').replace(/^./,s=>s.toUpperCase());

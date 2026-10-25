@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Mail, Plus, Sparkles, RefreshCw, ShieldCheck, ArrowRight } from 'lucide-react';
+import { Mail, Plus, Sparkles, RefreshCw, ShieldCheck, ArrowRight, Lock, Eye, EyeOff } from 'lucide-react';
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } from '@/components/atlas-ui';
 import { Link } from 'wouter';
 
@@ -59,6 +59,11 @@ export function EmailInbox() {
   const activeOwner = getActiveOwnerEmail();
   const [isIngesting, setIsIngesting] = useState(false);
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [showAuthPassword, setShowAuthPassword] = useState(false);
+  const [authSinceDate, setAuthSinceDate] = useState('2026-10-18T00:00:00');
   const [redraftingId, setRedraftingId] = useState<string | null>(null);
 
   // Ingest form state
@@ -176,34 +181,12 @@ export function EmailInbox() {
             <button
               className="btn btn-outline"
               disabled={isSyncing}
-              onClick={async () => {
-                try {
-                  setIsSyncing(true);
-                  const activeEmail = (typeof window !== 'undefined' ? localStorage.getItem('atlas_active_owner_email') : null) || 'deepak.paranjape@kentplc.com';
-                  const res = await fetch('/api/atlas/integrations/outlook/sync', {
-                    method: 'POST',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'X-Owner-Email': activeEmail,
-                    },
-                    body: JSON.stringify({ targetEmail: activeEmail }),
-                  });
-                  const data = await res.json();
-                  if (!res.ok || !data.success) {
-                    alert(`Outlook Sync Notice:\n\n${data.error || 'Failed to sync with live Outlook.'}`);
-                  } else {
-                    const scanned = data.scanned ?? data.count ?? 0;
-                    const drafted = data.drafted ?? (data.count !== undefined ? data.count : 0);
-                    alert(`Outlook Sync Complete!\n\nScanned ${scanned} email(s) from Microsoft 365.\nCreated ${drafted} new pending AI draft(s).`);
-                    queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
-                    queryClient.invalidateQueries({ queryKey: ['/api/atlas/authorization-inbox'] });
-                  }
-                } catch (err: any) {
-                  alert(`Outlook Sync Error: ${err.message}`);
-                } finally {
-                  setIsSyncing(false);
-                }
+              onClick={() => {
+                const activeEmail = (typeof window !== 'undefined' ? localStorage.getItem('atlas_active_owner_email') : null) || activeOwner || 'deepak.paranjape@kentplc.com';
+                setAuthEmail(activeEmail);
+                setIsAuthModalOpen(true);
               }}
+              title="Authorize and ingest corporate mailbox emails for this workspace"
             >
               <Mail size={15} /> {isSyncing ? 'Syncing Inbox…' : 'Sync Live Outlook Inbox'}
             </button>
@@ -355,6 +338,133 @@ export function EmailInbox() {
               </button>
               <button className="btn btn-primary" disabled={ingestMutation.isPending}>
                 {ingestMutation.isPending ? 'Ingesting & Pre-Drafting…' : 'Ingest & Pre-Draft Response'}
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {/* Mailbox Authentication & Ingestion Modal */}
+      {isAuthModalOpen && (
+        <Modal
+          title="Authorize Corporate Mailbox Ingestion"
+          subtitle={`Strictly ingests incoming emails for ${authEmail} into this workspace. Non-workspace accounts are barred.`}
+          onClose={() => setIsAuthModalOpen(false)}
+        >
+          <form
+            onSubmit={async (e) => {
+              e.preventDefault();
+              try {
+                setIsSyncing(true);
+                const res = await fetch('/api/atlas/integrations/outlook/sync', {
+                  method: 'POST',
+                  headers: {
+                    'Content-Type': 'application/json',
+                    'X-Owner-Email': authEmail.trim().toLowerCase(),
+                  },
+                  body: JSON.stringify({
+                    targetEmail: authEmail.trim().toLowerCase(),
+                    email: authEmail.trim().toLowerCase(),
+                    password: authPassword,
+                    sinceDate: authSinceDate,
+                    unreadOnly: false,
+                    count: 50,
+                  }),
+                });
+                const data = await res.json();
+                if (!res.ok || !data.success) {
+                  alert(`Outlook Sync Notice:\n\n${data.error || 'Failed to sync with live Outlook.'}`);
+                } else {
+                  const scanned = data.scanned ?? data.count ?? 0;
+                  const drafted = data.drafted ?? (data.count !== undefined ? data.count : 0);
+                  alert(`Outlook Sync Complete!\n\nScanned ${scanned} email(s) for ${authEmail}.\nCreated ${drafted} new pending AI draft(s).`);
+                  queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
+                  queryClient.invalidateQueries({ queryKey: ['/api/atlas/authorization-inbox'] });
+                  setIsAuthModalOpen(false);
+                }
+              } catch (err: any) {
+                alert(`Outlook Sync Error: ${err.message}`);
+              } finally {
+                setIsSyncing(false);
+              }
+            }}
+          >
+            <div className="field">
+              <label className="label" htmlFor="auth-email">Workspace User Email ID</label>
+              <input
+                id="auth-email"
+                className="input"
+                type="email"
+                value={authEmail}
+                onChange={(e) => setAuthEmail(e.target.value)}
+                required
+                readOnly
+                style={{ opacity: 0.85, cursor: 'not-allowed' }}
+              />
+              <span style={{ fontSize: 11, color: '#dda280', marginTop: 4, display: 'block' }}>
+                Strictly locked to active workspace owner ({authEmail}). Cross-tenant and secondary emails are barred.
+              </span>
+            </div>
+
+            <div className="field">
+              <label className="label" htmlFor="auth-password">Email Account Password / Credential</label>
+              <div style={{ position: 'relative' }}>
+                <input
+                  id="auth-password"
+                  className="input"
+                  type={showAuthPassword ? 'text' : 'password'}
+                  placeholder="Enter your email password to allow ingestion"
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.target.value)}
+                  style={{ paddingRight: 40 }}
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowAuthPassword(!showAuthPassword)}
+                  style={{
+                    position: 'absolute',
+                    right: 10,
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: '#8b849c',
+                    cursor: 'pointer',
+                  }}
+                >
+                  {showAuthPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+              <span style={{ fontSize: 11, color: '#8b849c', marginTop: 4, display: 'block' }}>
+                Credentials are encrypted with AES-256 and used to authenticate corporate mailbox access.
+              </span>
+            </div>
+
+            <div className="field">
+              <label className="label" htmlFor="auth-since">Ingest Emails Received Since</label>
+              <input
+                id="auth-since"
+                className="input"
+                type="text"
+                value={authSinceDate}
+                onChange={(e) => setAuthSinceDate(e.target.value)}
+                placeholder="2026-10-18T00:00:00"
+              />
+              <span style={{ fontSize: 11, color: '#8b849c', marginTop: 4, display: 'block' }}>
+                Defaults to 18th Oct 2026 to capture all recent engineering communications.
+              </span>
+            </div>
+
+            <GoverningNote>
+              Your digital twin strictly filters by your corporate email ID ({authEmail}). Emails from any other account or personal domain will be ignored.
+            </GoverningNote>
+
+            <div className="dialog-actions">
+              <button type="button" className="btn btn-outline" onClick={() => setIsAuthModalOpen(false)}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={isSyncing}>
+                <Lock size={14} /> {isSyncing ? 'Ingesting Mailbox…' : 'Authorize & Ingest Mailbox'}
               </button>
             </div>
           </form>

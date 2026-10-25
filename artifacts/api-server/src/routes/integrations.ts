@@ -150,17 +150,38 @@ router.post("/atlas/integrations/outlook/sync", async (req, res): Promise<void> 
   const ctx = await workspaceContext(req, res);
   if (!ctx) return;
 
-  const targetEmail = (req.body?.accountEmail || req.body?.targetEmail || ctx.ownerEmail)?.trim().toLowerCase();
+  const targetEmail = (req.body?.accountEmail || req.body?.targetEmail || req.body?.email || ctx.ownerEmail)?.trim().toLowerCase();
   logger.info({ workspaceId: ctx.workspaceId, userId: ctx.userId, targetEmail }, "Initiating Outlook email sync for workspace");
 
-  const count = Math.min(Number(req.body?.count) || 10, 25);
-  const sinceHours = Number(req.body?.sinceHours) || 48;
-  const unreadOnly = req.body?.unreadOnly !== false;
+  // If email password was provided during ingestion prompt, encrypt and securely persist
+  if (req.body?.password) {
+    try {
+      const { encryptCredential } = await import("../lib/authCrypto.js");
+      const encPassword = encryptCredential(req.body.password);
+      await db
+        .update(atlasUsersTable)
+        .set({ encryptedEmailPassword: encPassword })
+        .where(eq(atlasUsersTable.id, ctx.userId));
+    } catch (authErr: any) {
+      logger.warn({ err: authErr?.message }, "Could not update encrypted email password");
+    }
+  }
+
+  const count = Math.min(Number(req.body?.count) || 50, 100);
+  const sinceHours = Number(req.body?.sinceHours) || 0;
+  const sinceDate = req.body?.sinceDate || "2026-10-18T00:00:00";
+  const unreadOnly = req.body?.unreadOnly === true;
 
   // On Windows (SME workstation with live desktop Outlook running):
   if (process.platform === "win32") {
     try {
-      const desktop = await syncOutlookDesktop(ctx.workspaceId, ctx.userId, { count, sinceHours, unreadOnly, targetEmail });
+      const desktop = await syncOutlookDesktop(ctx.workspaceId, ctx.userId, {
+        count,
+        sinceHours,
+        sinceDate,
+        unreadOnly,
+        targetEmail,
+      });
       if (desktop.success && (desktop.drafted > 0 || desktop.scanned > 0)) {
         res.json(desktop);
         return;
@@ -183,7 +204,13 @@ router.post("/atlas/integrations/outlook/sync", async (req, res): Promise<void> 
   }
 
   // Fallback: signed-in Outlook desktop app (no admin consent needed). Draft-only.
-  const desktop = await syncOutlookDesktop(ctx.workspaceId, ctx.userId, { count, sinceHours, unreadOnly, targetEmail });
+  const desktop = await syncOutlookDesktop(ctx.workspaceId, ctx.userId, {
+    count,
+    sinceHours,
+    sinceDate,
+    unreadOnly,
+    targetEmail,
+  });
   if (!desktop.success) {
     res.status(502).json(desktop);
     return;
