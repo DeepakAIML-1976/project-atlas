@@ -2028,12 +2028,16 @@ router.post("/atlas/email-drafts/ingest", async (req, res): Promise<void> => {
     return;
   }
 
+  const generateDraft = req.body?.generateDraft === true;
+
   const draft = await processIncomingEmail(
     context.workspaceId,
     context.userId,
     parsed.data.sender,
     parsed.data.subject,
     parsed.data.incomingBody,
+    [],
+    generateDraft,
   );
 
   res.status(201).json(draft);
@@ -2067,6 +2071,30 @@ router.post("/atlas/email-drafts/redraft-all", async (req, res): Promise<void> =
   for (const draft of pendingDrafts) {
     const updated = await regenerateEmailDraft(context.workspaceId, draft.id);
     if (updated) updatedDrafts.push(updated);
+  }
+
+  res.json({ success: true, count: updatedDrafts.length, drafts: updatedDrafts });
+});
+
+router.post("/atlas/email-drafts/generate-batch", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const ids: string[] = Array.isArray(req.body?.ids) ? req.body.ids : [];
+  if (ids.length === 0) {
+    res.status(400).json({ error: "No email draft IDs provided" });
+    return;
+  }
+
+  const updatedDrafts = [];
+  for (const id of ids) {
+    try {
+      const updated = await regenerateEmailDraft(context.workspaceId, id);
+      if (updated) updatedDrafts.push(updated);
+    } catch (err: any) {
+      logger.warn({ err: err?.message, id }, "Failed to generate AI draft for email in batch");
+    }
   }
 
   res.json({ success: true, count: updatedDrafts.length, drafts: updatedDrafts });

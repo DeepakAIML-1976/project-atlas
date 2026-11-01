@@ -182,6 +182,7 @@ export interface DesktopSyncResult {
   source: "outlook_desktop";
   scanned: number;
   drafted: number;
+  ingested?: number;
   skippedAutomated: number;
   skippedDuplicate: number;
   emails: Array<typeof atlasEmailDraftsTable.$inferSelect>;
@@ -196,13 +197,14 @@ export interface DesktopSyncResult {
 export async function syncOutlookDesktop(
   workspaceId: string,
   userId: string,
-  opts: { count?: number; sinceHours?: number; sinceDate?: string; unreadOnly?: boolean; targetEmail?: string } = {},
+  opts: { count?: number; sinceHours?: number; sinceDate?: string; unreadOnly?: boolean; targetEmail?: string; generateDraft?: boolean } = {},
 ): Promise<DesktopSyncResult> {
   const result: DesktopSyncResult = {
     success: false,
     source: "outlook_desktop",
     scanned: 0,
     drafted: 0,
+    ingested: 0,
     skippedAutomated: 0,
     skippedDuplicate: 0,
     emails: [],
@@ -270,9 +272,20 @@ export async function syncOutlookDesktop(
       }
 
       try {
-        const draft = await processIncomingEmail(workspaceId, userId, sender, subject, body, styleExamples);
+        const draft = await processIncomingEmail(
+          workspaceId,
+          userId,
+          sender,
+          subject,
+          body,
+          styleExamples,
+          opts.generateDraft ?? false,
+        );
         result.emails.push(draft);
-        result.drafted++;
+        if (opts.generateDraft) {
+          result.drafted++;
+        }
+        result.ingested = (result.ingested ?? 0) + 1;
       } catch (ingestErr: any) {
         logger.warn({ err: ingestErr?.message, subject, sender }, "Failed to process incoming email draft");
       }

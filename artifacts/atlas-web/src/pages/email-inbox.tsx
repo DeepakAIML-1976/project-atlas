@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Mail, Plus, Sparkles, RefreshCw, ShieldCheck, ArrowRight, Lock, Eye, EyeOff } from 'lucide-react';
+import { Mail, Plus, Sparkles, RefreshCw, ShieldCheck, ArrowRight, Lock, Eye, EyeOff, CheckSquare, Square } from 'lucide-react';
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } from '@/components/atlas-ui';
 import { Link } from 'wouter';
+import { getActiveOwnerEmail } from '@workspace/api-client-react';
 
 interface EmailDraft {
   id: string;
@@ -52,8 +53,6 @@ function cleanDisplayBody(text?: string | null): string {
   return text;
 }
 
-import { getActiveOwnerEmail } from '@workspace/api-client-react';
-
 export function EmailInbox() {
   const queryClient = useQueryClient();
   const activeOwner = getActiveOwnerEmail();
@@ -64,7 +63,11 @@ export function EmailInbox() {
   const [authPassword, setAuthPassword] = useState('');
   const [showAuthPassword, setShowAuthPassword] = useState(false);
   const [authSinceDate, setAuthSinceDate] = useState('2026-10-18T00:00:00');
+  const [autoDraftOnSync, setAutoDraftOnSync] = useState(false);
+  const [manualAutoDraft, setManualAutoDraft] = useState(false);
   const [redraftingId, setRedraftingId] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [activeFilter, setActiveFilter] = useState<'all' | 'ingested' | 'pending' | 'authorized'>('all');
 
   // Ingest form state
   const [sender, setSender] = useState('John Engineering <john.doe@epc-contractor.com>');
@@ -92,10 +95,13 @@ export function EmailInbox() {
   });
 
   const ingestMutation = useMutation({
-    mutationFn: async (payload: { sender: string; subject: string; incomingBody: string }) => {
+    mutationFn: async (payload: { sender: string; subject: string; incomingBody: string; generateDraft: boolean }) => {
       const res = await fetch('/api/atlas/email-drafts/ingest', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Owner-Email': activeOwner,
+        },
         body: JSON.stringify(payload),
       });
       if (!res.ok) throw new Error('Failed to ingest email');
@@ -110,7 +116,10 @@ export function EmailInbox() {
 
   const redraftAllMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/atlas/email-drafts/redraft-all', { method: 'POST' });
+      const res = await fetch('/api/atlas/email-drafts/redraft-all', {
+        method: 'POST',
+        headers: { 'X-Owner-Email': activeOwner },
+      });
       if (!res.ok) throw new Error('Failed to redraft pending emails');
       return res.json();
     },
@@ -127,8 +136,11 @@ export function EmailInbox() {
   const redraftOneMutation = useMutation({
     mutationFn: async (id: string) => {
       setRedraftingId(id);
-      const res = await fetch(`/api/atlas/email-drafts/${id}/redraft`, { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to redraft email');
+      const res = await fetch(`/api/atlas/email-drafts/${id}/redraft`, {
+        method: 'POST',
+        headers: { 'X-Owner-Email': activeOwner },
+      });
+      if (!res.ok) throw new Error('Failed to generate draft');
       return res.json();
     },
     onSuccess: () => {
@@ -136,10 +148,34 @@ export function EmailInbox() {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/authorization-inbox'] });
     },
     onError: (err: any) => {
-      alert(`Error regenerating draft: ${err.message}`);
+      alert(`Error generating draft: ${err.message}`);
     },
     onSettled: () => {
       setRedraftingId(null);
+    },
+  });
+
+  const generateBatchMutation = useMutation({
+    mutationFn: async (ids: string[]) => {
+      const res = await fetch('/api/atlas/email-drafts/generate-batch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Owner-Email': activeOwner,
+        },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) throw new Error('Failed to generate drafts for selected emails');
+      return res.json();
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/authorization-inbox'] });
+      setSelectedIds(new Set());
+      alert(`Successfully generated AI Twin drafts for ${data.count || 0} selected email(s)!`);
+    },
+    onError: (err: any) => {
+      alert(`Batch Generation Error: ${err.message}`);
     },
   });
 
@@ -147,8 +183,33 @@ export function EmailInbox() {
   if (emailsQuery.isError) return <ErrorState retry={() => emailsQuery.refetch()} />;
 
   const drafts = emailsQuery.data?.emailDrafts ?? [];
-  const pendingCount = drafts.filter((d) => d.status === 'pending_authorization').length;
-  const llmInfo = llmQuery.data;
+  const ingestedDrafts = drafts.filter((d) => d.status === 'ingested' || !d.twinDraftResponse);
+  const pendingDrafts = drafts.filter((d) => d.status === 'pending_authorization' && Boolean(d.twinDraftResponse));
+  const authorizedDrafts = drafts.filter((d) => d.status === 'authorized');
+
+  const filteredDrafts = drafts.filter((d) => {
+    if (activeFilter === 'ingested') return d.status === 'ingested' || !d.twinDraftResponse;
+    if (activeFilter === 'pending') return d.status === 'pending_authorization' && Boolean(d.twinDraftResponse);
+    if (activeFilter === 'authorized') return d.status === 'authorized';
+    return true;
+  });
+
+  const toggleSelect = (id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedIds.size === filteredDrafts.length && filteredDrafts.length > 0) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredDrafts.map((d) => d.id)));
+    }
+  };
 
   const handleIngestSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -156,8 +217,11 @@ export function EmailInbox() {
       sender: sender.trim(),
       subject: subject.trim(),
       incomingBody: incomingBody.trim(),
+      generateDraft: manualAutoDraft,
     });
   };
+
+  const llmInfo = llmQuery.data;
 
   return (
     <>
@@ -168,7 +232,7 @@ export function EmailInbox() {
         description="Your AI Digital Twin reads incoming technical inquiries from your live Outlook desktop app, applies your 35-year Piping SME heuristics & DeepSeek intelligence, pre-drafts rigorous responses, and routes them to your Executive Authorization Inbox for sign-off."
         action={
           <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-            {pendingCount > 0 && (
+            {pendingDrafts.length > 0 && (
               <button
                 className="btn btn-outline"
                 disabled={redraftAllMutation.isPending}
@@ -210,12 +274,108 @@ export function EmailInbox() {
             </span>
           )}
           <span className="badge">{drafts.length} Ingested Emails</span>
-          {pendingCount > 0 && <span className="badge orange">{pendingCount} Pending Authorization</span>}
+          {ingestedDrafts.length > 0 && <span className="badge blue">{ingestedDrafts.length} Needs AI Draft</span>}
+          {pendingDrafts.length > 0 && <span className="badge orange">{pendingDrafts.length} Pending Authorization</span>}
         </div>
         <Link href="/authorization-inbox" className="btn btn-outline" style={{ fontSize: 13 }}>
           Open Executive Authorization Inbox <ShieldCheck size={14} />
         </Link>
       </div>
+
+      {/* Filter Tabs & Selection Bar */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, borderBottom: '1px solid #e5dfd5', paddingBottom: 10, flexWrap: 'wrap', gap: 10 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className={`btn btn-sm ${activeFilter === 'all' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => setActiveFilter('all')}
+          >
+            All Emails ({drafts.length})
+          </button>
+          <button
+            className={`btn btn-sm ${activeFilter === 'ingested' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => setActiveFilter('ingested')}
+          >
+            Needs AI Draft ({ingestedDrafts.length})
+          </button>
+          <button
+            className={`btn btn-sm ${activeFilter === 'pending' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => setActiveFilter('pending')}
+          >
+            Pending Review ({pendingDrafts.length})
+          </button>
+          <button
+            className={`btn btn-sm ${activeFilter === 'authorized' ? 'btn-primary' : 'btn-outline'}`}
+            style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={() => setActiveFilter('authorized')}
+          >
+            Authorized & Sent ({authorizedDrafts.length})
+          </button>
+        </div>
+
+        {filteredDrafts.length > 0 && (
+          <button
+            className="btn btn-outline"
+            style={{ fontSize: 12, padding: '4px 10px' }}
+            onClick={handleSelectAll}
+          >
+            {selectedIds.size === filteredDrafts.length ? (
+              <>
+                <CheckSquare size={13} /> Deselect All
+              </>
+            ) : (
+              <>
+                <Square size={13} /> Select All
+              </>
+            )}
+          </button>
+        )}
+      </div>
+
+      {/* Selected Action Bar */}
+      {selectedIds.size > 0 && (
+        <div
+          style={{
+            background: '#f0fdf4',
+            border: '1px solid #bbf7d0',
+            borderRadius: 8,
+            padding: '12px 18px',
+            marginBottom: 16,
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 12,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <CheckSquare size={18} color="#16a34a" />
+            <strong style={{ color: '#166534' }}>{selectedIds.size} email(s) selected</strong>
+          </div>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+            <button
+              className="btn btn-outline"
+              style={{ fontSize: 12, padding: '6px 12px' }}
+              onClick={() => setSelectedIds(new Set())}
+            >
+              Clear Selection
+            </button>
+            <button
+              className="btn btn-primary"
+              style={{ fontSize: 13, padding: '6px 16px' }}
+              disabled={generateBatchMutation.isPending}
+              onClick={() => generateBatchMutation.mutate(Array.from(selectedIds))}
+            >
+              <Sparkles size={14} className={generateBatchMutation.isPending ? 'spin' : ''} />
+              {generateBatchMutation.isPending
+                ? `Generating ${selectedIds.size} AI Twin Draft(s)…`
+                : `Generate AI Twin Drafts for Selected (${selectedIds.size})`}
+            </button>
+          </div>
+        </div>
+      )}
 
       {drafts.length === 0 ? (
         <Empty
@@ -228,61 +388,148 @@ export function EmailInbox() {
             </button>
           }
         />
+      ) : filteredDrafts.length === 0 ? (
+        <Empty
+          icon={Mail}
+          title={`No Emails in "${activeFilter.toUpperCase()}" view`}
+          description="Switch to 'All Emails' or another category tab to view your communications."
+          action={
+            <button className="btn btn-outline" onClick={() => setActiveFilter('all')}>
+              Show All Emails
+            </button>
+          }
+        />
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-          {drafts.map((draft) => (
-            <div key={draft.id} className="card card-pad" style={{ borderLeft: draft.status === 'authorized' ? '4px solid #16a34a' : '4px solid #3b82f6' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  <span className={`badge ${draft.status === 'authorized' ? 'green' : draft.status === 'rejected' ? 'red' : 'orange'}`}>
-                    {draft.status === 'authorized' ? '✓ Authorized & Sent' : draft.status === 'rejected' ? 'Rejected' : '⏳ Pending Sign-off'}
-                  </span>
-                  <span className="muted tiny">{formatDate(draft.createdAt)}</span>
-                </div>
-                {draft.confidence && (
-                  <span className="badge">Twin Confidence: {Math.round(draft.confidence * 100)}%</span>
-                )}
-              </div>
+          {filteredDrafts.map((draft) => {
+            const isNoDraft = draft.status === 'ingested' || !draft.twinDraftResponse;
+            const isSelected = selectedIds.has(draft.id);
 
-              <h3 style={{ fontSize: 18, margin: '0 0 4px', fontWeight: 600 }}>{draft.subject}</h3>
-              <div className="muted tiny" style={{ marginBottom: 12 }}>From: {draft.sender}</div>
-
-              <div style={{ background: '#f4f1eb', padding: '12px 16px', borderRadius: 6, fontSize: 13, marginBottom: 14 }}>
-                <strong>Incoming Inquiry:</strong>
-                <p style={{ margin: '6px 0 0', color: '#4a4556', whiteSpace: 'pre-wrap' }}>{cleanDisplayBody(draft.incomingBody)}</p>
-              </div>
-
-              <div style={{ background: '#fffdf9', border: '1px solid #e5dfd5', padding: '14px 18px', borderRadius: 6, fontSize: 14, marginBottom: 14 }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#c65131', fontWeight: 600, fontSize: 12, marginBottom: 6 }}>
-                  <Sparkles size={14} /> AI TWIN PROPOSED DRAFT RESPONSE:
-                </div>
-                <p style={{ margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{draft.twinDraftResponse}</p>
-                {draft.reasoning && (
-                  <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #e5dfd5', fontSize: 12, color: '#797480' }}>
-                    <strong>SME Engineering Rationale:</strong> {draft.reasoning}
+            return (
+              <div
+                key={draft.id}
+                className="card card-pad"
+                style={{
+                  borderLeft:
+                    draft.status === 'authorized'
+                      ? '4px solid #16a34a'
+                      : isNoDraft
+                      ? '4px solid #94a3b8'
+                      : '4px solid #3b82f6',
+                  backgroundColor: isSelected ? '#fafaf9' : undefined,
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelect(draft.id)}
+                      style={{ width: 16, height: 16, cursor: 'pointer' }}
+                      title="Select email for AI draft generation"
+                    />
+                    <span
+                      className={`badge ${
+                        draft.status === 'authorized'
+                          ? 'green'
+                          : draft.status === 'rejected'
+                          ? 'red'
+                          : isNoDraft
+                          ? 'blue'
+                          : 'orange'
+                      }`}
+                    >
+                      {draft.status === 'authorized'
+                        ? '✓ Authorized & Sent'
+                        : draft.status === 'rejected'
+                        ? 'Rejected'
+                        : isNoDraft
+                        ? '📥 Ingested (No AI Draft)'
+                        : '⏳ Pending Sign-off'}
+                    </span>
+                    <span className="muted tiny">{formatDate(draft.createdAt)}</span>
                   </div>
+                  {draft.confidence && (
+                    <span className="badge">Twin Confidence: {Math.round(draft.confidence * 100)}%</span>
+                  )}
+                </div>
+
+                <h3 style={{ fontSize: 18, margin: '0 0 4px', fontWeight: 600 }}>{draft.subject}</h3>
+                <div className="muted tiny" style={{ marginBottom: 12 }}>From: {draft.sender}</div>
+
+                <div style={{ background: '#f4f1eb', padding: '12px 16px', borderRadius: 6, fontSize: 13, marginBottom: 14 }}>
+                  <strong>Incoming Inquiry:</strong>
+                  <p style={{ margin: '6px 0 0', color: '#4a4556', whiteSpace: 'pre-wrap' }}>{cleanDisplayBody(draft.incomingBody)}</p>
+                </div>
+
+                {isNoDraft ? (
+                  <div
+                    style={{
+                      background: '#f8fafc',
+                      border: '1px dashed #cbd5e1',
+                      padding: '14px 18px',
+                      borderRadius: 6,
+                      fontSize: 13,
+                      marginBottom: 10,
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      flexWrap: 'wrap',
+                      gap: 10,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#475569' }}>
+                      <Sparkles size={16} color="#d97706" />
+                      <span>
+                        <strong>AI Draft Not Yet Generated.</strong> Select this email or generate an AI draft on demand when a response is required.
+                      </span>
+                    </div>
+                    <button
+                      className="btn btn-primary"
+                      style={{ fontSize: 13 }}
+                      disabled={redraftingId === draft.id}
+                      onClick={() => redraftOneMutation.mutate(draft.id)}
+                    >
+                      <Sparkles size={13} className={redraftingId === draft.id ? 'spin' : ''} />
+                      {redraftingId === draft.id ? 'Generating AI Draft…' : 'Generate AI Draft'}
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ background: '#fffdf9', border: '1px solid #e5dfd5', padding: '14px 18px', borderRadius: 6, fontSize: 14, marginBottom: 14 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#c65131', fontWeight: 600, fontSize: 12, marginBottom: 6 }}>
+                        <Sparkles size={14} /> AI TWIN PROPOSED DRAFT RESPONSE:
+                      </div>
+                      <p style={{ margin: 0, whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>{draft.twinDraftResponse}</p>
+                      {draft.reasoning && (
+                        <div style={{ marginTop: 10, paddingTop: 10, borderTop: '1px dashed #e5dfd5', fontSize: 12, color: '#797480' }}>
+                          <strong>SME Engineering Rationale:</strong> {draft.reasoning}
+                        </div>
+                      )}
+                    </div>
+
+                    {draft.status === 'pending_authorization' && (
+                      <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
+                        <button
+                          className="btn btn-outline"
+                          style={{ fontSize: 13 }}
+                          disabled={redraftingId === draft.id}
+                          onClick={() => redraftOneMutation.mutate(draft.id)}
+                          title="Regenerate this specific draft"
+                        >
+                          <RefreshCw size={13} className={redraftingId === draft.id ? 'spin' : ''} />
+                          {redraftingId === draft.id ? 'Regenerating…' : 'Re-draft with AI'}
+                        </button>
+                        <Link href="/authorization-inbox" className="btn btn-primary" style={{ fontSize: 13 }}>
+                          Review in Executive Inbox <ArrowRight size={14} />
+                        </Link>
+                      </div>
+                    )}
+                  </>
                 )}
               </div>
-
-              {draft.status === 'pending_authorization' && (
-                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10 }}>
-                  <button
-                    className="btn btn-outline"
-                    style={{ fontSize: 13 }}
-                    disabled={redraftingId === draft.id}
-                    onClick={() => redraftOneMutation.mutate(draft.id)}
-                    title="Regenerate this specific draft"
-                  >
-                    <RefreshCw size={13} className={redraftingId === draft.id ? 'spin' : ''} />
-                    {redraftingId === draft.id ? 'Regenerating…' : 'Re-draft with AI'}
-                  </button>
-                  <Link href="/authorization-inbox" className="btn btn-primary" style={{ fontSize: 13 }}>
-                    Review in Executive Inbox <ArrowRight size={14} />
-                  </Link>
-                </div>
-              )}
-            </div>
-          ))}
+            );
+          })}
         </div>
       )}
 
@@ -328,8 +575,26 @@ export function EmailInbox() {
               />
             </div>
 
+            <div className="field" style={{ display: 'flex', alignItems: 'flex-start', gap: 10, margin: '14px 0' }}>
+              <input
+                id="manual-auto-draft"
+                type="checkbox"
+                checked={manualAutoDraft}
+                onChange={(e) => setManualAutoDraft(e.target.checked)}
+                style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer' }}
+              />
+              <div>
+                <label htmlFor="manual-auto-draft" style={{ fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                  Generate AI Twin draft immediately upon ingest
+                </label>
+                <span style={{ fontSize: 11, color: '#8b849c', display: 'block', marginTop: 2 }}>
+                  When unchecked, the email is ingested without an automatic draft so you can generate it selectively on demand.
+                </span>
+              </div>
+            </div>
+
             <GoverningNote>
-              Your twin will match the query against your 35-year SME heuristics and create a pre-draft response for your 1-click review.
+              Your twin strictly analyzes inquiries according to your 35-year SME heuristics and project specifications.
             </GoverningNote>
 
             <div className="dialog-actions">
@@ -337,7 +602,7 @@ export function EmailInbox() {
                 Cancel
               </button>
               <button className="btn btn-primary" disabled={ingestMutation.isPending}>
-                {ingestMutation.isPending ? 'Ingesting & Pre-Drafting…' : 'Ingest & Pre-Draft Response'}
+                {ingestMutation.isPending ? 'Ingesting…' : 'Ingest Email'}
               </button>
             </div>
           </form>
@@ -369,6 +634,7 @@ export function EmailInbox() {
                     sinceDate: authSinceDate,
                     unreadOnly: false,
                     count: 50,
+                    generateDraft: autoDraftOnSync,
                   }),
                 });
                 const data = await res.json();
@@ -376,8 +642,13 @@ export function EmailInbox() {
                   alert(`Outlook Sync Notice:\n\n${data.error || 'Failed to sync with live Outlook.'}`);
                 } else {
                   const scanned = data.scanned ?? data.count ?? 0;
-                  const drafted = data.drafted ?? (data.count !== undefined ? data.count : 0);
-                  alert(`Outlook Sync Complete!\n\nScanned ${scanned} email(s) for ${authEmail}.\nCreated ${drafted} new pending AI draft(s).`);
+                  const drafted = data.drafted ?? 0;
+                  const ingested = data.ingested ?? (data.count !== undefined ? data.count : 0);
+                  if (autoDraftOnSync) {
+                    alert(`Outlook Sync Complete!\n\nScanned ${scanned} email(s) for ${authEmail}.\nIngested and generated ${drafted} new pending AI draft(s).`);
+                  } else {
+                    alert(`Outlook Sync Complete!\n\nScanned ${scanned} email(s) for ${authEmail}.\nIngested ${ingested} email(s) successfully into your inbox.\nYou can now select which emails require an AI drafted reply.`);
+                  }
                   queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
                   queryClient.invalidateQueries({ queryKey: ['/api/atlas/authorization-inbox'] });
                   setIsAuthModalOpen(false);
@@ -453,6 +724,24 @@ export function EmailInbox() {
               <span style={{ fontSize: 11, color: '#8b849c', marginTop: 4, display: 'block' }}>
                 Defaults to 18th Oct 2026 to capture all recent engineering communications.
               </span>
+            </div>
+
+            <div className="field" style={{ margin: '14px 0', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
+              <input
+                id="auth-auto-draft"
+                type="checkbox"
+                checked={autoDraftOnSync}
+                onChange={(e) => setAutoDraftOnSync(e.target.checked)}
+                style={{ marginTop: 3, width: 16, height: 16, cursor: 'pointer' }}
+              />
+              <div>
+                <label htmlFor="auth-auto-draft" style={{ fontWeight: 600, fontSize: 13, cursor: 'pointer' }}>
+                  Automatically generate AI Twin drafts during sync
+                </label>
+                <span style={{ fontSize: 11, color: '#8b849c', display: 'block', marginTop: 2 }}>
+                  When unchecked (default), emails are cleanly ingested first, allowing you to selectively choose which emails require an AI drafted reply.
+                </span>
+              </div>
             </div>
 
             <GoverningNote>

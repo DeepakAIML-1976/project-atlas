@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { db, atlasLinkedAccountsTable } from "@workspace/db";
+import { db, atlasLinkedAccountsTable, atlasUsersTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { workspaceContext } from "../lib/atlas";
 import { fetchLiveOutlookEmails, fetchLiveTeamsMeetings, getMSGraphConfig, verifyMSGraphToken } from "../lib/integrations/msGraph";
@@ -171,6 +171,7 @@ router.post("/atlas/integrations/outlook/sync", async (req, res): Promise<void> 
   const sinceHours = Number(req.body?.sinceHours) || 0;
   const sinceDate = req.body?.sinceDate || "2026-10-18T00:00:00";
   const unreadOnly = req.body?.unreadOnly === true;
+  const generateDraft = req.body?.generateDraft === true || req.body?.autoDraft === true;
 
   // On Windows (SME workstation with live desktop Outlook running):
   if (process.platform === "win32") {
@@ -181,8 +182,9 @@ router.post("/atlas/integrations/outlook/sync", async (req, res): Promise<void> 
         sinceDate,
         unreadOnly,
         targetEmail,
+        generateDraft,
       });
-      if (desktop.success && (desktop.drafted > 0 || desktop.scanned > 0)) {
+      if (desktop.success && (desktop.drafted > 0 || (desktop.ingested ?? 0) > 0 || desktop.scanned > 0)) {
         res.json(desktop);
         return;
       }
@@ -196,20 +198,21 @@ router.post("/atlas/integrations/outlook/sync", async (req, res): Promise<void> 
 
   // Preferred in cloud / Render: Microsoft Graph when the tenant has granted app access
   if (graphConfigured) {
-    const result = await fetchLiveOutlookEmails(ctx.workspaceId, ctx.userId, targetEmail);
+    const result = await fetchLiveOutlookEmails(ctx.workspaceId, ctx.userId, targetEmail, generateDraft);
     if (result.success || !result.requiresSetup) {
       res.json(result);
       return;
     }
   }
 
-  // Fallback: signed-in Outlook desktop app (no admin consent needed). Draft-only.
+  // Fallback: signed-in Outlook desktop app (no admin consent needed).
   const desktop = await syncOutlookDesktop(ctx.workspaceId, ctx.userId, {
     count,
     sinceHours,
     sinceDate,
     unreadOnly,
     targetEmail,
+    generateDraft,
   });
   if (!desktop.success) {
     res.status(502).json(desktop);

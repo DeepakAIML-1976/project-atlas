@@ -244,18 +244,30 @@ export async function processIncomingEmail(
   subject: string,
   incomingBody: string,
   styleExamples: string[] = [],
+  generateDraft: boolean = false,
 ): Promise<typeof atlasEmailDraftsTable.$inferSelect> {
   const cleanedBody = cleanHtml(incomingBody);
-  const { twinDraftResponse, reasoning, confidence, isLLMFallback } = await generateDraftReply(
-    workspaceId,
-    sender,
-    subject,
-    cleanedBody,
-    styleExamples,
-  );
 
-  // Check delegation rules for workspace - default strictly to pending_authorization
-  let initialStatus = "pending_authorization";
+  let twinDraftResponse = "";
+  let reasoning: string | null = null;
+  let confidence: number | null = null;
+  let isLLMFallback = false;
+  let initialStatus = "ingested";
+
+  if (generateDraft) {
+    const draftRes = await generateDraftReply(
+      workspaceId,
+      sender,
+      subject,
+      cleanedBody,
+      styleExamples,
+    );
+    twinDraftResponse = draftRes.twinDraftResponse;
+    reasoning = draftRes.reasoning;
+    confidence = draftRes.confidence;
+    isLLMFallback = Boolean(draftRes.isLLMFallback);
+    initialStatus = "pending_authorization";
+  }
 
   const [draft] = await db
     .insert(atlasEmailDraftsTable)
@@ -267,7 +279,7 @@ export async function processIncomingEmail(
       twinDraftResponse,
       reasoning,
       confidence,
-      isLLMFallback: Boolean(isLLMFallback),
+      isLLMFallback,
       status: initialStatus,
       authorizedAt: null,
     })
@@ -276,7 +288,7 @@ export async function processIncomingEmail(
   await db.insert(atlasActivityTable).values({
     workspaceId,
     userId,
-    action: "ingested_email_draft",
+    action: generateDraft ? "ingested_email_draft" : "ingested_email",
     recordType: "email_draft",
     recordId: draft.id,
   });
@@ -310,6 +322,7 @@ export async function regenerateEmailDraft(
       twinDraftResponse,
       reasoning,
       confidence,
+      status: "pending_authorization",
     })
     .where(and(eq(atlasEmailDraftsTable.id, draftId), eq(atlasEmailDraftsTable.workspaceId, workspaceId)))
     .returning();

@@ -124,8 +124,19 @@ export async function fetchLiveOutlookEmails(
   workspaceId: string,
   userId: string,
   targetEmail?: string,
-  config: MSGraphConfig = getMSGraphConfig(),
+  generateDraftOrConfig?: boolean | MSGraphConfig,
+  configArg?: MSGraphConfig,
 ) {
+  let generateDraft = false;
+  let config: MSGraphConfig = getMSGraphConfig();
+
+  if (typeof generateDraftOrConfig === "boolean") {
+    generateDraft = generateDraftOrConfig;
+    if (configArg) config = configArg;
+  } else if (generateDraftOrConfig && typeof generateDraftOrConfig === "object") {
+    config = generateDraftOrConfig;
+  }
+
   const token = await resolveMSGraphToken(config);
   if (!token) {
     return {
@@ -210,7 +221,15 @@ export async function fetchLiveOutlookEmails(
       const incomingBody = cleanEmailBody(rawBody, msg.bodyPreview);
 
       try {
-        const draft = await processIncomingEmail(workspaceId, userId, sender, subject, incomingBody);
+        const draft = await processIncomingEmail(
+          workspaceId,
+          userId,
+          sender,
+          subject,
+          incomingBody,
+          [],
+          generateDraft,
+        );
         ingestedDrafts.push(draft);
         existingKeys.add(key);
       } catch (ingestErr: any) {
@@ -221,7 +240,8 @@ export async function fetchLiveOutlookEmails(
     return {
       success: true,
       scanned: messages.length,
-      drafted: ingestedDrafts.length,
+      drafted: generateDraft ? ingestedDrafts.length : 0,
+      ingested: ingestedDrafts.length,
       count: ingestedDrafts.length,
       emails: ingestedDrafts,
     };
