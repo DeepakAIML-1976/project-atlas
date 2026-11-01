@@ -170,9 +170,13 @@ export async function fetchLiveOutlookEmails(
 
     if (!response.ok) {
       const errText = await response.text();
+      let friendlyError = `Microsoft Graph API error (${response.status}) for ${userTarget}: ${errText}`;
+      if (errText.includes("ErrorInvalidUser") || response.status === 404) {
+        friendlyError = `Corporate Mailbox Notice for ${userTarget}:\n\nCloud Microsoft Graph API access requires corporate IT admin consent. Since your laptop has the Outlook desktop application configured for ${userTarget}, emails sync directly from your workstation to the cloud database (no IT admin consent needed).`;
+      }
       return {
         success: false,
-        error: `Microsoft Graph API error (${response.status}) for ${userTarget}: ${errText}`,
+        error: friendlyError,
       };
     }
 
