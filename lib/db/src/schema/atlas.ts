@@ -256,6 +256,22 @@ export const atlasEmailDraftsTable = pgTable(
   (table) => [index("atlas_email_drafts_workspace_idx").on(table.workspaceId)],
 );
 
+export const atlasSentEmailsTable = pgTable(
+  "atlas_sent_emails",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => atlasWorkspacesTable.id, { onDelete: "cascade" }),
+    recipient: text("recipient").notNull(),
+    subject: text("subject").notNull(),
+    sentBody: text("sent_body").notNull(),
+    sentAt: timestamp("sent_at", { withTimezone: true }),
+    createdAt: createdAt(),
+  },
+  (table) => [index("atlas_sent_emails_workspace_idx").on(table.workspaceId)],
+);
+
 export const atlasMeetingContributionsTable = pgTable(
   "atlas_meeting_contributions",
   {
@@ -560,4 +576,7 @@ export type AtlasLinkedAccount = typeof atlasLinkedAccountsTable.$inferSelect;
 export type AtlasAppHealth = typeof atlasAppHealthTable.$inferSelect;
 export type AtlasTwinPreference = typeof atlasTwinPreferencesTable.$inferSelect;
 export type AtlasChatDraft = typeof atlasChatDraftsTable.$inferSelect;
+export const insertAtlasSentEmailSchema = createInsertSchema(atlasSentEmailsTable).omit({ id: true, createdAt: true });
+export type AtlasSentEmail = typeof atlasSentEmailsTable.$inferSelect;
+export type InsertAtlasSentEmail = z.infer<typeof insertAtlasSentEmailSchema>;
 export type InsertAtlasWorkspace = z.infer<typeof insertAtlasWorkspaceSchema>;

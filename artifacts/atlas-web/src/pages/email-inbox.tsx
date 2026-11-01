@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Mail, Plus, Sparkles, RefreshCw, ShieldCheck, ArrowRight, Lock, Eye, EyeOff, CheckSquare, Square } from 'lucide-react';
+import { Mail, Plus, Sparkles, RefreshCw, ShieldCheck, ArrowRight, Lock, Eye, EyeOff, CheckSquare, Square, Send, Search } from 'lucide-react';
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } from '@/components/atlas-ui';
 import { Link } from 'wouter';
 import { getActiveOwnerEmail } from '@workspace/api-client-react';
@@ -20,6 +20,19 @@ interface EmailDraft {
 
 interface EmailDraftsData {
   emailDrafts: EmailDraft[];
+}
+
+interface SentEmail {
+  id: string;
+  recipient: string;
+  subject: string;
+  sentBody: string;
+  sentAt?: string | null;
+  createdAt: string;
+}
+
+interface SentEmailsData {
+  sentEmails: SentEmail[];
 }
 
 interface LLMStatusData {
@@ -68,6 +81,8 @@ export function EmailInbox() {
   const [redraftingId, setRedraftingId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [activeFilter, setActiveFilter] = useState<'all' | 'ingested' | 'pending' | 'authorized'>('all');
+  const [mainTab, setMainTab] = useState<'inbox' | 'sent'>('inbox');
+  const [sentSearchQuery, setSentSearchQuery] = useState('');
 
   // Ingest form state
   const [sender, setSender] = useState('John Engineering <john.doe@epc-contractor.com>');
@@ -81,6 +96,17 @@ export function EmailInbox() {
         headers: { 'X-Owner-Email': activeOwner },
       });
       if (!res.ok) throw new Error('Failed to fetch email drafts');
+      return res.json();
+    },
+  });
+
+  const sentEmailsQuery = useQuery<SentEmailsData>({
+    queryKey: ['/api/atlas/sent-emails', activeOwner],
+    queryFn: async () => {
+      const res = await fetch('/api/atlas/sent-emails', {
+        headers: { 'X-Owner-Email': activeOwner },
+      });
+      if (!res.ok) throw new Error('Failed to fetch sent emails');
       return res.json();
     },
   });
@@ -194,6 +220,17 @@ export function EmailInbox() {
     return true;
   });
 
+  const sentEmails = sentEmailsQuery.data?.sentEmails ?? [];
+  const filteredSentEmails = sentEmails.filter((s) => {
+    if (!sentSearchQuery.trim()) return true;
+    const query = sentSearchQuery.toLowerCase();
+    return (
+      (s.recipient && s.recipient.toLowerCase().includes(query)) ||
+      (s.subject && s.subject.toLowerCase().includes(query)) ||
+      (s.sentBody && s.sentBody.toLowerCase().includes(query))
+    );
+  });
+
   const toggleSelect = (id: string) => {
     setSelectedIds((prev) => {
       const next = new Set(prev);
@@ -261,7 +298,173 @@ export function EmailInbox() {
         }
       />
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+      {/* Primary Navigation Switcher: Received Emails (Inbox) vs Email Sent */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 20, borderBottom: '2px solid #e5dfd5', paddingBottom: 12 }}>
+        <button
+          className={`btn ${mainTab === 'inbox' ? 'btn-primary' : 'btn-outline'}`}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 20px', fontWeight: 600, fontSize: 14 }}
+          onClick={() => setMainTab('inbox')}
+        >
+          <Mail size={16} />
+          Received Emails (Inbox)
+          <span style={{
+            background: mainTab === 'inbox' ? 'rgba(255,255,255,0.25)' : '#e5dfd5',
+            color: mainTab === 'inbox' ? '#fff' : '#49454f',
+            padding: '2px 8px',
+            borderRadius: 12,
+            fontSize: 11
+          }}>
+            {drafts.length}
+          </span>
+        </button>
+
+        <button
+          className={`btn ${mainTab === 'sent' ? 'btn-primary' : 'btn-outline'}`}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 20px', fontWeight: 600, fontSize: 14 }}
+          onClick={() => setMainTab('sent')}
+        >
+          <Send size={16} />
+          Email Sent
+          <span style={{
+            background: mainTab === 'sent' ? 'rgba(255,255,255,0.25)' : '#e5dfd5',
+            color: mainTab === 'sent' ? '#fff' : '#49454f',
+            padding: '2px 8px',
+            borderRadius: 12,
+            fontSize: 11
+          }}>
+            {sentEmails.length}
+          </span>
+          <span style={{
+            background: '#ecfdf5',
+            color: '#059669',
+            border: '1px solid #a7f3d0',
+            padding: '2px 6px',
+            borderRadius: 4,
+            fontSize: 10,
+            fontWeight: 700
+          }}>
+            Context Tier 2
+          </span>
+        </button>
+      </div>
+
+      {mainTab === 'sent' ? (
+        <div>
+          {/* Informational Banner */}
+          <div
+            style={{
+              background: '#f8fafc',
+              border: '1px solid #cbd5e1',
+              borderRadius: 8,
+              padding: '14px 20px',
+              marginBottom: 20,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              flexWrap: 'wrap',
+              gap: 12,
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              <Send size={20} color="#0284c7" />
+              <div>
+                <strong style={{ color: '#0f172a', fontSize: 14 }}>Outlook Sent Items (Context Verification Tier 2)</strong>
+                <p style={{ margin: '4px 0 0', fontSize: 12, color: '#475569' }}>
+                  These outgoing emails were sent by Deepak and ingested directly from Outlook desktop. The Context Verification Engine uses them as <strong>Tier 2 Context</strong> to ground future AI draft responses in Deepak&apos;s actual past decisions, commitments, clarifications, and engineering voice.
+                </p>
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <span className="badge green">Tier 2 Grounding Active</span>
+              <span className="badge">{filteredSentEmails.length} Sent Emails</span>
+            </div>
+          </div>
+
+          {/* Search bar */}
+          <div style={{ marginBottom: 20, position: 'relative' }}>
+            <Search size={16} color="#64748b" style={{ position: 'absolute', left: 14, top: 12 }} />
+            <input
+              type="text"
+              className="input"
+              style={{ paddingLeft: 38, width: '100%', fontSize: 13 }}
+              placeholder="Search sent emails by recipient, subject, or message content..."
+              value={sentSearchQuery}
+              onChange={(e) => setSentSearchQuery(e.target.value)}
+            />
+          </div>
+
+          {sentEmailsQuery.isLoading ? (
+            <Load count={3} />
+          ) : filteredSentEmails.length === 0 ? (
+            <Empty
+              icon={Send}
+              title={sentEmails.length === 0 ? "No Sent Emails Ingested" : "No Matching Sent Emails"}
+              description={
+                sentEmails.length === 0
+                  ? "Run daily sync or companion sync while Outlook is running to ingest your Sent Items for Context Verification."
+                  : "Try clearing your search query to see all sent emails."
+              }
+              action={
+                sentSearchQuery ? (
+                  <button className="btn btn-outline" onClick={() => setSentSearchQuery('')}>
+                    Clear Search
+                  </button>
+                ) : undefined
+              }
+            />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {filteredSentEmails.map((email) => (
+                <div
+                  key={email.id}
+                  className="card"
+                  style={{
+                    padding: 18,
+                    border: '1px solid #e2e8f0',
+                    borderRadius: 8,
+                    background: '#ffffff',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10, marginBottom: 10 }}>
+                    <div>
+                      <h3 style={{ margin: 0, fontSize: 15, fontWeight: 600, color: '#0f172a' }}>{email.subject}</h3>
+                      <div style={{ fontSize: 13, color: '#475569', marginTop: 4 }}>
+                        <strong>To:</strong> {email.recipient}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <span className="badge green" style={{ fontSize: 11 }}>
+                        Grounding: Tier 2
+                      </span>
+                      <span style={{ fontSize: 12, color: '#64748b' }}>
+                        {formatDate(email.sentAt || email.createdAt)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      background: '#f8fafc',
+                      padding: 12,
+                      borderRadius: 6,
+                      fontSize: 13,
+                      lineHeight: 1.5,
+                      color: '#334155',
+                      whiteSpace: 'pre-wrap',
+                      maxHeight: 250,
+                      overflowY: 'auto',
+                    }}
+                  >
+                    {cleanDisplayBody(email.sentBody)}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
           <span className="badge green">Live Outlook Desktop Linked</span>
           {llmInfo?.isConfigured ? (
@@ -532,6 +735,8 @@ export function EmailInbox() {
           })}
         </div>
       )}
+    </>
+  )}
 
       {/* Ingest Simulation Modal */}
       {isIngesting && (

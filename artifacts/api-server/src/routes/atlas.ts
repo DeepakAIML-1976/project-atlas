@@ -79,6 +79,7 @@ import {
   atlasLiveMeetingsTable,
   atlasDelegationRulesTable,
   atlasChatDraftsTable,
+  atlasSentEmailsTable,
   db,
   pool,
 } from "@workspace/db";
@@ -2045,6 +2046,24 @@ router.get("/atlas/email-drafts", async (req, res): Promise<void> => {
   } catch (err: any) {
     logger.warn({ err: err?.message }, "Fallback in /atlas/email-drafts");
     res.json({ emailDrafts: [] });
+  }
+});
+
+router.get("/atlas/sent-emails", async (req, res): Promise<void> => {
+  try {
+    const context = await workspaceContext(req, res);
+    if (!context) return;
+
+    const sentEmails = await db
+      .select()
+      .from(atlasSentEmailsTable)
+      .where(eq(atlasSentEmailsTable.workspaceId, context.workspaceId))
+      .orderBy(desc(atlasSentEmailsTable.sentAt));
+
+    res.json({ sentEmails });
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Fallback in /atlas/sent-emails");
+    res.json({ sentEmails: [] });
   }
 });
 

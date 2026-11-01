@@ -3,6 +3,7 @@ import {
   db,
   atlasKnowledgeUnitsTable,
   atlasEmailDraftsTable,
+  atlasSentEmailsTable,
   atlasChatDraftsTable,
   atlasMeetingTriggersTable,
   atlasMeetingsTable,
@@ -45,6 +46,7 @@ export interface VerificationResult {
 
 export interface HierarchyEvidence {
   tier1Emails: Array<{ id: string; subject: string; sender: string; body: string }>;
+  tier2SentEmails: Array<{ id: string; subject: string; recipient: string; body: string; sentAt?: Date | null }>;
   tier2Teams: Array<{ id: string; sender: string; message: string; date: Date }>;
   tier3Zoom: Array<{ id: string; sender: string; message: string; date: Date }>;
   tier4Heuristics: Array<{ id: string; topic: string; heuristic: string }>;
@@ -101,7 +103,36 @@ export async function gather8TierHierarchyContext(
       body: e.incomingBody.slice(0, 300),
     }));
 
-  // 2. Tier 2: Microsoft Teams
+  // 1b. Tier 2: Outlook Sent Items (Deepak's Outgoing Responses, Clarifications & Voice)
+  const allSent = await db
+    .select({
+      id: atlasSentEmailsTable.id,
+      recipient: atlasSentEmailsTable.recipient,
+      subject: atlasSentEmailsTable.subject,
+      sentBody: atlasSentEmailsTable.sentBody,
+      sentAt: atlasSentEmailsTable.sentAt,
+    })
+    .from(atlasSentEmailsTable)
+    .where(eq(atlasSentEmailsTable.workspaceId, workspaceId))
+    .limit(300);
+
+  const tier2SentEmails = allSent
+    .filter((e) => {
+      const s = `${e.subject} ${e.sentBody} ${e.recipient}`.toLowerCase();
+      const hasWordMatch = words.some((w) => s.includes(w));
+      const recipientMatch = senderName.length > 2 && e.recipient.toLowerCase().includes(senderName.toLowerCase().split(" ")[0]);
+      return hasWordMatch || recipientMatch;
+    })
+    .slice(0, 5)
+    .map((e) => ({
+      id: e.id,
+      subject: e.subject,
+      recipient: e.recipient,
+      body: e.sentBody.slice(0, 300),
+      sentAt: e.sentAt,
+    }));
+
+  // 2. Tier 3: Microsoft Teams
   const teamsMessages = await db
     .select({
       id: atlasChatDraftsTable.id,
@@ -309,6 +340,7 @@ export async function gather8TierHierarchyContext(
 
   return {
     tier1Emails,
+    tier2SentEmails,
     tier2Teams,
     tier3Zoom,
     tier4Heuristics,
@@ -323,6 +355,10 @@ export function format8TierHierarchyPrompt(evidence: HierarchyEvidence): string 
   const t1 = evidence.tier1Emails.length > 0
     ? evidence.tier1Emails.map((e) => `  - [Subject: ${e.subject}] From: ${e.sender} -> ${e.body}`).join("\n")
     : "  - (No matching prior emails found in inbox database)";
+
+  const t2Sent = evidence.tier2SentEmails && evidence.tier2SentEmails.length > 0
+    ? evidence.tier2SentEmails.map((e) => `  - [Deepak Sent to: ${e.recipient} | Subj: ${e.subject}]: ${e.body}`).join("\n")
+    : "  - (No matching prior sent emails found in Sent Items database)";
 
   const t2 = evidence.tier2Teams.length > 0
     ? evidence.tier2Teams.map((t) => `  - [Teams msg from ${t.sender}]: ${t.message}`).join("\n")
@@ -353,30 +389,33 @@ export function format8TierHierarchyPrompt(evidence: HierarchyEvidence): string 
     : "  - (Standard engineering authority: all formal commitments require Deepak's human approval)";
 
   return `======================================================================
-MANDATORY 8-TIER CONTEXTUAL INFORMATION HIERARCHY (Follow in strict precedence order):
+MANDATORY 9-TIER CONTEXTUAL INFORMATION HIERARCHY (Follow in strict precedence order):
 ======================================================================
-1) OUTLOOK EMAIL CONTEXT:
+1) OUTLOOK RECEIVED EMAIL CONTEXT:
 ${t1}
 
-2) MICROSOFT TEAMS CONTEXT:
+2) OUTLOOK SENT ITEMS CONTEXT (Deepak's Past Outgoing Responses, Clarifications & Voice):
+${t2Sent}
+
+3) MICROSOFT TEAMS CONTEXT:
 ${t2}
 
-3) ZOOM CONTEXT:
+4) ZOOM CONTEXT:
 ${t3}
 
-4) KNOWLEDGE AND HEURISTICS (Deepak's 16 Golden Piping Heuristics & SME Rules):
+5) KNOWLEDGE AND HEURISTICS (Deepak's 16 Golden Piping Heuristics & SME Rules):
 ${t4}
 
-5) SOURCES (Project 5884/5533 specs, ASME B31.3 / B16.5 codes, P&IDs):
+6) SOURCES (Project 5884/5533 specs, ASME B31.3 / B16.5 codes, P&IDs):
 ${t5}
 
-6) MEETINGS DATA (Calendar Meetings, Schedules, Agendas, Participants):
+7) MEETINGS DATA (Calendar Meetings, Schedules, Agendas, Participants):
 ${t6}
 
-7) DECISIONS (Approved Engineering Decisions & Sign-offs):
+8) DECISIONS (Approved Engineering Decisions & Sign-offs):
 ${t7}
 
-8) DELEGATION RULES (Discipline Ownership, Risk Levels & Delegation Boundaries):
+9) DELEGATION RULES (Discipline Ownership, Risk Levels & Delegation Boundaries):
 ${t8}
 ======================================================================`;
 }

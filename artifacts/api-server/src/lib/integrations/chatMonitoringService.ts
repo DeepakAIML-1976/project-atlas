@@ -334,32 +334,14 @@ export async function syncTeamsAndZoomMessages(workspaceId: string): Promise<{
   let teamsCount = 0;
   let zoomCount = 0;
 
-  // 1. Scan Zoom local chat logs (already strictly filtered by isAddressedToDeepak)
-  try {
-    const zoomChats = scanLocalZoomMeetingChats();
-    for (const chat of zoomChats) {
-      const { isNew } = await ingestCleanChatMessage({
-        workspaceId,
-        platform: "zoom",
-        chatId: chat.chatId,
-        senderName: chat.senderName,
-        incomingMessage: chat.incomingMessage,
-        createdAt: chat.timestamp,
-      });
-      if (isNew) zoomCount++;
-    }
-  } catch (err: any) {
-    logger.warn({ err: err?.message }, "Error during Zoom chat sync");
-  }
-
-  // 2. Scan Teams messages directly from desktop application (no MS Graph needed)
-  try {
-    if (process.platform === "win32") {
-      const { syncFromDesktopTeamsApp } = await import("./desktopTeamsParser.js");
+  if (process.platform === "win32") {
+    try {
+      const { syncFromDesktopZoomApp, syncFromDesktopTeamsApp } = await import("./desktopTeamsParser.js");
+      zoomCount = await syncFromDesktopZoomApp(workspaceId);
       teamsCount = await syncFromDesktopTeamsApp(workspaceId);
+    } catch (err: any) {
+      logger.warn({ err: err?.message }, "Error during desktop apps sync");
     }
-  } catch (err: any) {
-    logger.warn({ err: err?.message }, "Error during desktop Teams app sync");
   }
 
   return { teamsCount, zoomCount, totalNew: teamsCount + zoomCount };
