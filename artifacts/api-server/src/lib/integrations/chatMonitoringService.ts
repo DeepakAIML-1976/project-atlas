@@ -357,55 +357,83 @@ export async function syncTeamsAndZoomMessages(workspaceId: string): Promise<{
     const { resolveMSGraphToken } = await import("./msGraph.js");
     const graphToken = await resolveMSGraphToken();
     if (graphToken) {
-      const chatsRes = await fetch("https://graph.microsoft.com/v1.0/chats?$top=15", {
+      const userGuid = process.env.MS_GRAPH_USER_GUID || "534a887e-47ef-435c-bbc6-90ac75b9f5b4";
+      let chats: any[] = [];
+      const chatsRes = await fetch("https://graph.microsoft.com/v1.0/chats?$top=20", {
         headers: { Authorization: `Bearer ${graphToken}` },
       });
       if (chatsRes.ok) {
         const chatsData = (await chatsRes.json()) as { value?: any[] };
-        for (const c of chatsData.value || []) {
-          const isDirectMessage = c.chatType === "oneOnOne";
+        chats = chatsData.value || [];
+      } else {
+        // Application token fallback: query user's chats
+        const userChatsRes = await fetch(`https://graph.microsoft.com/v1.0/users/${userGuid}/chats?$top=20`, {
+          headers: { Authorization: `Bearer ${graphToken}` },
+        });
+        if (userChatsRes.ok) {
+          const uData = (await userChatsRes.json()) as { value?: any[] };
+          chats = uData.value || [];
+        }
+      }
 
-          const msgsRes = await fetch(`https://graph.microsoft.com/v1.0/chats/${c.id}/messages?$top=10`, {
-            headers: { Authorization: `Bearer ${graphToken}` },
-          });
-          if (!msgsRes.ok) continue;
-          const msgsData = (await msgsRes.json()) as { value?: any[] };
-          for (const m of msgsData.value || []) {
-            const sender = m.from?.user?.displayName || "Teams Colleague";
-            const email = m.from?.user?.userPrincipalName || "";
-            const body = (m.body?.content || "").replace(/<[^>]+>/g, " ").trim();
+      for (const c of chats) {
+        const isDirectMessage = c.chatType === "oneOnOne";
 
-            if (!body) continue;
+        const msgsRes = await fetch(`https://graph.microsoft.com/v1.0/users/${userGuid}/chats/${c.id}/messages?$top=15`, {
+          headers: { Authorization: `Bearer ${graphToken}` },
+        });
+        if (!msgsRes.ok) continue;
+        const msgsData = (await msgsRes.json()) as { value?: any[] };
+        for (const m of msgsData.value || []) {
+          if (!m.id || m.messageType === "systemEventMessage" || !m.body?.content) continue;
 
-            // Strictly filter: 1-on-1 DM to Deepak OR specifically addressed/mentioned
-            if (
-              !isAddressedToDeepak({
-                senderName: sender,
-                senderEmail: email,
-                messageText: body,
-                isDirectMessage,
-              })
-            ) {
-              continue;
-            }
+          const body = (m.body?.content || "").replace(/<[^>]+>/g, " ").trim();
+          if (
+            !body ||
+            body.includes("AI Representative") ||
+            body.includes("my twin is currently offline") ||
+            body.includes("i am an AI representative and not authorised") ||
+            body.includes("🔔 [Digital Twin: New Draft Awaiting Approval]")
+          ) {
+            continue;
+          }
 
-            const { isNew } = await ingestCleanChatMessage({
-              workspaceId,
-              platform: "teams",
-              chatId: c.topic || c.id,
-              messageId: m.id,
+          const sender = m.from?.user?.displayName || "Teams Colleague";
+          const email = m.from?.user?.email || m.from?.user?.userPrincipalName || "";
+
+          // CRITICAL: Never ingest messages originated by Deepak Paranjape
+          if (isDeepakIdentity(sender) || isDeepakIdentity(email)) {
+            continue;
+          }
+
+          // Strictly filter: 1-on-1 DM to Deepak OR specifically addressed/mentioned
+          if (
+            !isAddressedToDeepak({
               senderName: sender,
               senderEmail: email,
-              incomingMessage: body,
-              createdAt: m.createdDateTime ? new Date(m.createdDateTime) : new Date(),
-            });
-            if (isNew) teamsCount++;
+              messageText: body,
+              isDirectMessage,
+            })
+          ) {
+            continue;
           }
+
+          const { isNew } = await ingestCleanChatMessage({
+            workspaceId,
+            platform: "teams",
+            chatId: c.topic || c.id,
+            messageId: m.id,
+            senderName: sender,
+            senderEmail: email,
+            incomingMessage: body,
+            createdAt: m.createdDateTime ? new Date(m.createdDateTime) : new Date(),
+          });
+          if (isNew) teamsCount++;
         }
       }
     }
   } catch (err: any) {
-    logger.warn({ err: err?.message }, "Notice: Teams Graph chat scan requires user token");
+    logger.warn({ err: err?.message }, "Notice: Teams Graph chat scan error");
   }
 
   return { teamsCount, zoomCount, totalNew: teamsCount + zoomCount };

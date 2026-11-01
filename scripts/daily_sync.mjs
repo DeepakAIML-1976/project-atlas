@@ -353,8 +353,99 @@ async function executeSync() {
           }
         }
       }
+
+      // 4. SCAN TEAMS CHATS (MS Graph API)
+      try {
+        const envFile = path.resolve("C:/Users/dpeng/Documents/Digital-Twin-Suite/.env");
+        if (fs.existsSync(envFile)) {
+          const envLines = fs.readFileSync(envFile, "utf8").split(/\r?\n/);
+          const envMap = {};
+          for (const l of envLines) {
+            const m = l.match(/^([A-Z0-9_]+)=(.*)$/);
+            if (m) envMap[m[1]] = m[2].trim().replace(/^['"]|['"]$/g, "");
+          }
+
+          if (envMap.MS_GRAPH_CLIENT_ID && envMap.MS_GRAPH_CLIENT_SECRET && envMap.MS_GRAPH_TENANT_ID) {
+            const tokenParams = new URLSearchParams({
+              client_id: envMap.MS_GRAPH_CLIENT_ID,
+              client_secret: envMap.MS_GRAPH_CLIENT_SECRET,
+              grant_type: "client_credentials",
+              scope: "https://graph.microsoft.com/.default",
+            });
+            const tRes = await fetch(`https://login.microsoftonline.com/${envMap.MS_GRAPH_TENANT_ID}/oauth2/v2.0/token`, {
+              method: "POST",
+              headers: { "Content-Type": "application/x-www-form-urlencoded" },
+              body: tokenParams.toString(),
+            });
+            if (tRes.ok) {
+              const { access_token } = await tRes.json();
+              const userGuid = envMap.MS_GRAPH_USER_GUID || "534a887e-47ef-435c-bbc6-90ac75b9f5b4";
+              let chats = [];
+              const cRes = await fetch("https://graph.microsoft.com/v1.0/chats?$top=20", {
+                headers: { Authorization: `Bearer ${access_token}` },
+              });
+              if (cRes.ok) {
+                const cData = await cRes.json();
+                chats = cData.value || [];
+              } else {
+                const ucRes = await fetch(`https://graph.microsoft.com/v1.0/users/${userGuid}/chats?$top=20`, {
+                  headers: { Authorization: `Bearer ${access_token}` },
+                });
+                if (ucRes.ok) {
+                  const ucData = await ucRes.json();
+                  chats = ucData.value || [];
+                }
+              }
+
+              for (const c of chats) {
+                const isDM = c.chatType === "oneOnOne";
+                const mRes = await fetch(`https://graph.microsoft.com/v1.0/users/${userGuid}/chats/${c.id}/messages?$top=15`, {
+                  headers: { Authorization: `Bearer ${access_token}` },
+                });
+                if (!mRes.ok) continue;
+                const mData = await mRes.json();
+                for (const m of mData.value || []) {
+                  if (!m.id || m.messageType === "systemEventMessage" || !m.body?.content) continue;
+                  const body = (m.body.content || "").replace(/<[^>]+>/g, " ").trim();
+                  if (!body) continue;
+                  if (body.includes("AI Representative") || body.includes("my twin is currently offline") || body.includes("🔔 [Digital Twin")) continue;
+
+                  const sender = m.from?.user?.displayName || "Teams Colleague";
+                  const email = m.from?.user?.email || m.from?.user?.userPrincipalName || "";
+
+                  // Never ingest messages from Deepak
+                  if (isDeepak(sender) || isDeepak(email)) continue;
+
+                  // Must be DM to Deepak or explicitly addressed to Deepak
+                  if (!isDM && !isTargeted(sender, "", body)) continue;
+
+                  const existCheck = await client.query("SELECT id FROM atlas_chat_drafts WHERE workspace_id = $1 AND message_id = $2", [WORKSPACE_ID, m.id]);
+                  if (existCheck.rows.length === 0) {
+                    await client.query(`
+                      INSERT INTO atlas_chat_drafts (id, workspace_id, platform, chat_id, message_id, sender_name, sender_email, incoming_message, twin_draft_response, status, created_at)
+                      VALUES ($1, $2, 'teams', $3, $4, $5, $6, $7, '', 'ingested', $8)
+                    `, [
+                      crypto.randomUUID(),
+                      WORKSPACE_ID,
+                      c.topic || c.id,
+                      m.id,
+                      sender,
+                      email || null,
+                      body,
+                      m.createdDateTime ? new Date(m.createdDateTime) : new Date(),
+                    ]);
+                    chatMessagesInserted++;
+                  }
+                }
+              }
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("Notice: Teams chat scan:", e.message);
+      }
     } catch (e) {
-      console.warn("Notice: Zoom chat scan:", e.message);
+      console.warn("Notice: Chat scan:", e.message);
     }
 
     console.log("\n================ SYNC REPORT ================");

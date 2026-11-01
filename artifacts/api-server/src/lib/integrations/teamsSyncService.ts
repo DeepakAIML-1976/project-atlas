@@ -133,20 +133,7 @@ export async function runTeamsSyncCycle(): Promise<SyncStatusResult> {
         if (!cleanText) continue;
 
         const senderName = msg.from?.user?.displayName || "Colleague";
-        const senderEmail = msg.from?.user?.email || "";
-
-        logger.info({
-          chatId: chat.id,
-          messageId: msg.id,
-          senderName,
-          senderEmail,
-          text: cleanText.slice(0, 60),
-        }, "[TEAMS UNIVERSAL SYNC] New incoming message detected");
-
-        // 5. Dynamic Workspace Resolution:
-        // Chats polled for Deepak's Microsoft account belong to Deepak's workspace.
-        let targetWorkspace = allWorkspaces.find((w) => w.name.toLowerCase().includes("deepak")) || allWorkspaces[0];
-        const targetWorkspaceId = targetWorkspace?.id || "1a39970a-abf0-48c3-8b89-08b669e80bbe";
+        const senderEmail = msg.from?.user?.email || msg.from?.user?.userPrincipalName || "";
 
         // Resolve sender email accurately from Graph message or display name
         let resolvedSenderEmail = senderEmail;
@@ -163,38 +150,54 @@ export async function runTeamsSyncCycle(): Promise<SyncStatusResult> {
           }
         }
 
-        // Extract thread history
-        const threadHistory = rawMsgs
-          .filter((m) => m.id !== msg.id && m.body?.content)
-          .reverse()
-          .map((m) => ({
-            sender: m.from?.user?.displayName || "User",
-            text: (m.body.content as string).replace(/<[^>]+>/g, "").trim(),
-          }));
+        // CRITICAL RULE 1: NEVER INGEST MESSAGES ORIGINATED BY DEEPAK PARANJAPE
+        const { isDeepakIdentity, isAddressedToDeepak, ingestCleanChatMessage } = await import("./chatMonitoringService.js");
+        if (isDeepakIdentity(senderName) || isDeepakIdentity(resolvedSenderEmail)) {
+          processedMessageIds.add(msg.id);
+          continue;
+        }
 
-        // 6. Process message through 4-pillar verification & approval workflow
-        const incoming: IncomingTeamsMessage = {
-          workspaceId: targetWorkspaceId,
+        // CRITICAL RULE 2: ONLY INGEST 1-ON-1 DMS TO DEEPAK OR MESSAGES SPECIFICALLY ADDRESSED TO DEEPAK
+        const isDirectMessage = chat.chatType === "oneOnOne";
+        if (
+          !isAddressedToDeepak({
+            senderName,
+            senderEmail: resolvedSenderEmail,
+            messageText: cleanText,
+            isDirectMessage,
+          })
+        ) {
+          processedMessageIds.add(msg.id);
+          continue;
+        }
+
+        logger.info({
           chatId: chat.id,
           messageId: msg.id,
           senderName,
           senderEmail: resolvedSenderEmail,
-          chatType: chat.chatType === "oneOnOne" ? "personal_dm" : "group_chat",
-          messageText: cleanText,
-          isMentioned: true,
-          isReplyToDeepak: true,
-          threadHistory,
-        };
+          text: cleanText.slice(0, 60),
+        }, "[TEAMS UNIVERSAL SYNC] New incoming message addressed to Deepak detected");
 
-        const result = await processTeamsChatMessage(incoming);
+        // 5. Dynamic Workspace Resolution:
+        // Chats polled for Deepak's Microsoft account belong to Deepak's workspace.
+        let targetWorkspace = allWorkspaces.find((w) => w.name.toLowerCase().includes("deepak")) || allWorkspaces[0];
+        const targetWorkspaceId = targetWorkspace?.id || "1a39970a-abf0-48c3-8b89-08b669e80bbe";
+
+        // 6. Ingest cleanly WITHOUT auto-generating draft replies (user will selectively request draft)
+        await ingestCleanChatMessage({
+          workspaceId: targetWorkspaceId,
+          platform: "teams",
+          chatId: chat.topic || chat.id,
+          messageId: msg.id,
+          senderName,
+          senderEmail: resolvedSenderEmail,
+          incomingMessage: cleanText,
+          createdAt: msg.createdDateTime ? new Date(msg.createdDateTime) : new Date(),
+        });
+
         processedMessageIds.add(msg.id);
         totalProcessedMessages++;
-
-        // If an immediate reply was generated and not yet posted, dispatch it to Teams
-        if (result.shouldReply && result.replyText && !result.postedToTeams) {
-          logger.info({ chatId: chat.id }, "[TEAMS UNIVERSAL SYNC] Dispatching immediate reply to Teams");
-          await sendMSGraphTeamsChatMessage(chat.id, result.replyText);
-        }
       }
     }
 

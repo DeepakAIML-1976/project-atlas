@@ -205,6 +205,19 @@ export async function processTeamsChatMessage(msg: IncomingTeamsMessage): Promis
     }
   }
 
+  // Never process or ingest messages originated by Deepak or the workspace owner
+  const { isDeepakIdentity } = await import("./chatMonitoringService.js");
+  if (isFromOwner || isDeepakIdentity(msg.senderName) || isDeepakIdentity(msg.senderEmail)) {
+    logger.info({ senderName: msg.senderName, senderEmail: msg.senderEmail }, "Skipping self-originated message from owner/Deepak in teamsChatBot");
+    return {
+      handled: true,
+      shouldReply: false,
+      replyText: "",
+      knowledgeBaseMatched: false,
+      escalatedToInbox: false,
+    };
+  }
+
   // 2. Cross-reference across 4 Pillars (Email DB, Chat DB, Knowledge Bank, Heuristics)
   const { verifyContextAndResolve } = await import("../contextVerificationEngine.js");
   const verification = await verifyContextAndResolve({
