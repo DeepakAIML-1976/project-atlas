@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { privateFile } from "../lib/atlasStorage";
-import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import {
   CreateAtlasDecisionBody,
   CreateAtlasDecisionResponse,
@@ -1833,7 +1833,7 @@ router.get("/atlas/live-meetings", async (req, res): Promise<void> => {
       .select()
       .from(atlasLiveMeetingsTable)
       .where(eq(atlasLiveMeetingsTable.workspaceId, context.workspaceId))
-      .orderBy(desc(atlasLiveMeetingsTable.createdAt));
+      .orderBy(asc(atlasLiveMeetingsTable.scheduledAt), desc(atlasLiveMeetingsTable.createdAt));
 
     res.json(GetLiveMeetingsResponse.parse({ liveMeetings }));
   } catch (err: any) {
@@ -1989,6 +1989,37 @@ router.patch("/atlas/live-meetings/:id/status", async (req, res): Promise<void> 
   await activity(context.workspaceId, context.userId, "updated_status", "live_meeting", id);
 
   res.json(updated);
+});
+
+router.patch("/atlas/live-meetings/:id/bot-assignment", async (req, res): Promise<void> => {
+  const context = await workspaceContext(req, res);
+  if (!context) return;
+  if (!requireSharedWrite(context, res)) return;
+
+  const { id } = req.params;
+  const botStatus = req.body?.botStatus === "scheduled" ? "scheduled" : "idle";
+
+  const [updated] = await db
+    .update(atlasLiveMeetingsTable)
+    .set({
+      botStatus,
+    })
+    .where(
+      and(
+        eq(atlasLiveMeetingsTable.id, id),
+        eq(atlasLiveMeetingsTable.workspaceId, context.workspaceId),
+      ),
+    )
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Live meeting session not found" });
+    return;
+  }
+
+  await activity(context.workspaceId, context.userId, botStatus === "scheduled" ? "assigned_live_bot" : "unassigned_live_bot", "live_meeting", id);
+
+  res.json({ success: true, meeting: updated });
 });
 
 router.get("/atlas/email-drafts", async (req, res): Promise<void> => {

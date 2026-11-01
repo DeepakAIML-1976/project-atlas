@@ -285,6 +285,8 @@ export const atlasLiveMeetingsTable = pgTable(
     meetingTitle: text("meeting_title").notNull(),
     platform: text("platform").notNull().default("teams"),
     meetingUrl: text("meeting_url"),
+    location: text("location"),
+    scheduledAt: timestamp("scheduled_at", { withTimezone: true }),
     botStatus: text("bot_status").notNull().default("idle"),
     botDisplayName: text("bot_display_name").notNull().default("Deepak's AI Representative (Atlas)"),
     joinedAt: timestamp("joined_at", { withTimezone: true }),

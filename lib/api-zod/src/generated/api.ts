@@ -840,6 +840,8 @@ export const GetLiveMeetingsResponse = zod.object({
   "meetingTitle": zod.string(),
   "platform": zod.string(),
   "meetingUrl": zod.string().nullish(),
+  "location": zod.string().nullish(),
+  "scheduledAt": zod.coerce.date().nullish(),
   "botStatus": zod.string(),
   "botDisplayName": zod.string(),
   "joinedAt": zod.coerce.date().nullish(),

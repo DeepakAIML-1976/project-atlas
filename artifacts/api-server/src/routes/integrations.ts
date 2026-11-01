@@ -375,6 +375,53 @@ router.post("/atlas/integrations/outlook/webhook", async (req, res): Promise<voi
   res.json({ status: "acknowledged" });
 });
 
+// GET Outlook Desktop status (is Outlook.exe running on workstation)
+router.get("/atlas/integrations/outlook/status", async (req, res): Promise<void> => {
+  const { isOutlookProcessRunning } = await import("../lib/integrations/outlookCalendar.js");
+  const isRunning = isOutlookProcessRunning();
+  res.json({
+    platform: process.platform,
+    isDesktopAvailable: process.platform === "win32",
+    isRunning,
+    account: "deepak.paranjape@kentplc.com",
+    message: isRunning
+      ? "Outlook desktop app is active and ready for sync."
+      : "Outlook is not currently running. Please open the Outlook desktop app to allow sync.",
+  });
+});
+
+// POST sync Outlook Calendar meetings into atlas_live_meetings
+router.post("/atlas/integrations/outlook/calendar/sync", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const targetEmail = (req.body?.targetEmail || req.body?.accountEmail || req.body?.email || ctx.ownerEmail || "deepak.paranjape@kentplc.com").trim().toLowerCase();
+  const daysAhead = Number(req.body?.daysAhead) || 14;
+
+  if (process.platform === "win32") {
+    const { syncOutlookCalendar, isOutlookProcessRunning } = await import("../lib/integrations/outlookCalendar.js");
+    if (!isOutlookProcessRunning()) {
+      res.status(400).json({
+        success: false,
+        error: "Outlook desktop application is not open. Please open your Outlook desktop app and try again.",
+        requiresOutlookOpen: true,
+      });
+      return;
+    }
+
+    const result = await syncOutlookCalendar(ctx.workspaceId, daysAhead, targetEmail);
+    res.json(result);
+    return;
+  }
+
+  // Cloud/Render notice:
+  res.status(400).json({
+    success: false,
+    error: "Calendar synchronization from your signed-in corporate Outlook profile runs directly from your Windows workstation via sync_outlook_to_cloud.bat or the local desktop runner (no corporate IT admin consent needed).",
+    requiresWorkstation: true,
+  });
+});
+
 // GET universal sync status across all workspaces
 router.get("/atlas/integrations/sync/status", async (_req, res): Promise<void> => {
   const { getSyncStatus } = await import("../lib/integrations/teamsSyncService.js");

@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Video, Plus, AlertTriangle, Sparkles, Send, CheckCircle2, PhoneOff, ShieldCheck, MessageSquare, Bot, UserCheck, RefreshCw, Link as LinkIcon, Trash2 } from 'lucide-react';
+import { Video, Plus, AlertTriangle, Sparkles, Send, CheckCircle2, PhoneOff, ShieldCheck, MessageSquare, Bot, UserCheck, RefreshCw, Link as LinkIcon, Trash2, Calendar, CalendarClock, ExternalLink, Play } from 'lucide-react';
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } from '@/components/atlas-ui';
 import { Link } from 'wouter';
 
@@ -11,6 +11,8 @@ interface LiveMeeting {
   meetingUrl?: string | null;
   botStatus: string;
   botDisplayName: string;
+  scheduledAt?: string | null;
+  location?: string | null;
   joinedAt?: string | null;
   leftAt?: string | null;
   createdAt: string;
@@ -98,6 +100,60 @@ export function LiveMeetings() {
       return res.json();
     },
     enabled: !!selectedMeetingId,
+  });
+
+  const [filterTab, setFilterTab] = useState<'all' | 'scheduled' | 'week' | 'in_call'>('all');
+
+  const outlookStatusQuery = useQuery<{
+    platform: string;
+    isDesktopAvailable: boolean;
+    isRunning: boolean;
+    account: string;
+    message: string;
+  }>({
+    queryKey: ['/api/atlas/integrations/outlook/status'],
+    queryFn: async () => {
+      const res = await fetch('/api/atlas/integrations/outlook/status');
+      if (!res.ok) throw new Error('Failed to fetch Outlook status');
+      return res.json();
+    },
+    refetchInterval: 8000,
+  });
+
+  const syncOutlookCalendarMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/atlas/integrations/outlook/calendar/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ daysAhead: 14 }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to sync Outlook calendar');
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
+      alert(`Outlook Calendar Sync Complete!\n\nIngested ${data.count || 0} active meetings from Outlook calendar into your digital twin.`);
+    },
+    onError: (err: any) => {
+      alert(`Calendar Sync Notice: ${err.message}`);
+    },
+  });
+
+  const toggleBotAssignmentMutation = useMutation({
+    mutationFn: async ({ meetingId, newStatus }: { meetingId: string; newStatus: 'scheduled' | 'idle' }) => {
+      const res = await fetch(`/api/atlas/live-meetings/${meetingId}/bot-assignment`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ botStatus: newStatus }),
+      });
+      if (!res.ok) throw new Error('Failed to update bot assignment');
+      return res.json();
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings', selectedMeetingId] });
+    },
   });
 
   const syncAllMutation = useMutation({
@@ -210,6 +266,18 @@ export function LiveMeetings() {
   const meetings = meetingsQuery.data?.liveMeetings ?? [];
   const linkedAccounts = accountsQuery.data?.accounts ?? [];
 
+  const filteredMeetings = meetings.filter((m) => {
+    if (filterTab === 'scheduled') return m.botStatus === 'scheduled';
+    if (filterTab === 'in_call') return m.botStatus === 'in_call';
+    if (filterTab === 'week') {
+      if (!m.scheduledAt) return false;
+      const d = new Date(m.scheduledAt).getTime();
+      const now = Date.now();
+      return d >= now - 86400000 && d <= now + 7 * 86400000;
+    }
+    return true;
+  });
+
   const handleDeploySubmit = (e: React.FormEvent) => {
     e.preventDefault();
     deployMutation.mutate({
@@ -246,18 +314,28 @@ export function LiveMeetings() {
   return (
     <>
       <PageHead
-        eyebrow="COGNITIVE SUITE / LIVE MEETING BOT & ACOUSTIC TRIGGER ENGINE"
+        eyebrow="COGNITIVE SUITE / LIVE MEETING BOT & OUTLOOK CALENDAR"
         title="Live Meeting AI Representative"
         italic="always identified."
-        description="Connect your 2 MS Teams accounts (Personal & Company) for daily calendar sync. Deploys your digital twin as an explicitly labeled AI bot ('Deepak's AI Representative (Atlas)') to live Teams meetings to log notes and route acoustic wake-up triggers."
+        description="Sync your desktop Outlook calendar (deepak.paranjape@kentplc.com). Review upcoming meetings for the week, select which sessions Deepak's AI Representative will attend, and review live transcripts."
         action={
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+            <button
+              className="btn btn-outline"
+              disabled={syncOutlookCalendarMutation.isPending}
+              onClick={() => syncOutlookCalendarMutation.mutate()}
+              style={{ fontWeight: 600, borderColor: '#c65131', color: '#c65131' }}
+            >
+              <CalendarClock size={15} className={syncOutlookCalendarMutation.isPending ? 'spin' : ''} />
+              {syncOutlookCalendarMutation.isPending ? 'Syncing Outlook...' : 'Sync Outlook Calendar'}
+            </button>
+
             <button
               className="btn btn-outline"
               disabled={syncAllMutation.isPending}
               onClick={() => syncAllMutation.mutate()}
             >
-              <RefreshCw size={15} className={syncAllMutation.isPending ? 'spin' : ''} /> Sync Both Teams Accounts Now
+              <RefreshCw size={15} className={syncAllMutation.isPending ? 'spin' : ''} /> Sync Linked Accounts
             </button>
 
             <button className="btn btn-outline" onClick={() => setIsLinkingAccount(true)}>
@@ -265,18 +343,31 @@ export function LiveMeetings() {
             </button>
 
             <button className="btn btn-primary" style={{ fontWeight: 600 }} onClick={() => setIsDeploying(true)}>
-              <Plus size={15} /> Connect MS Teams / Zoom Meeting Link
+              <Plus size={15} /> Connect Meeting Link
             </button>
           </div>
         }
       />
+
+      {/* Outlook Application Notice Banner if Outlook is closed */}
+      {outlookStatusQuery.data && !outlookStatusQuery.data.isRunning && (
+        <div className="notice" style={{ background: '#fffbeb', borderColor: '#fde68a', color: '#92400e', marginBottom: 20, display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+          <AlertTriangle size={20} style={{ flexShrink: 0, marginTop: 2 }} />
+          <div style={{ flex: 1 }}>
+            <strong style={{ fontSize: 14 }}>Outlook Desktop Application Notice</strong>
+            <p style={{ margin: '4px 0 0', fontSize: 13, lineHeight: 1.4 }}>
+              The desktop Outlook application is currently closed on this system. Please open Outlook (<code>deepak.paranjape@kentplc.com</code>) to allow continuous weekly and daily calendar and email ingestion.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Linked MS Teams Accounts Panel */}
       <div className="card card-pad" style={{ marginBottom: 24, background: '#faf8f5', borderColor: '#e2dcd2' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
           <div>
             <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>
-              Linked MS Teams Accounts ({linkedAccounts.length})
+              Linked MS Teams & Outlook Accounts ({linkedAccounts.length})
             </h3>
             <span style={{ fontSize: 12, color: '#666' }}>
               Multi-account daily calendar sync active • Zero mock data policy enforced
@@ -327,52 +418,174 @@ export function LiveMeetings() {
         {/* Left Column: Meeting Sessions List */}
         <div>
           <div className="section-heading" style={{ marginTop: 0 }}>
-            <h2>Meeting Bot Sessions</h2>
-            <span>REAL-TIME DEPLOYMENT</span>
+            <h2>Upcoming & Active Meetings ({filteredMeetings.length})</h2>
+            <span>OUTLOOK & TEAMS SYNC</span>
           </div>
 
-          {meetings.length === 0 ? (
+          {/* Filter Tabs */}
+          <div style={{ display: 'flex', gap: 6, marginBottom: 14, flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className={`btn ${filterTab === 'all' ? 'btn-primary' : 'btn-outline'}`}
+              style={{ fontSize: 12, padding: '4px 10px' }}
+              onClick={() => setFilterTab('all')}
+            >
+              All Meetings ({meetings.length})
+            </button>
+            <button
+              type="button"
+              className={`btn ${filterTab === 'scheduled' ? 'btn-primary' : 'btn-outline'}`}
+              style={{ fontSize: 12, padding: '4px 10px' }}
+              onClick={() => setFilterTab('scheduled')}
+            >
+              🤖 Scheduled for Bot ({meetings.filter((m) => m.botStatus === 'scheduled').length})
+            </button>
+            <button
+              type="button"
+              className={`btn ${filterTab === 'week' ? 'btn-primary' : 'btn-outline'}`}
+              style={{ fontSize: 12, padding: '4px 10px' }}
+              onClick={() => setFilterTab('week')}
+            >
+              📅 Next 7 Days ({meetings.filter((m) => {
+                if (!m.scheduledAt) return false;
+                const d = new Date(m.scheduledAt).getTime();
+                const now = Date.now();
+                return d >= now - 86400000 && d <= now + 7 * 86400000;
+              }).length})
+            </button>
+            <button
+              type="button"
+              className={`btn ${filterTab === 'in_call' ? 'btn-primary' : 'btn-outline'}`}
+              style={{ fontSize: 12, padding: '4px 10px' }}
+              onClick={() => setFilterTab('in_call')}
+            >
+              🟢 In-Call ({meetings.filter((m) => m.botStatus === 'in_call').length})
+            </button>
+          </div>
+
+          {filteredMeetings.length === 0 ? (
             <Empty
               icon={Video}
-              title="No Active Meeting Sessions"
-              description="Deploy Deepak's AI Representative to a Teams or Zoom call to begin real-time meeting representation, note logging, and acoustic wake-up triggers."
+              title={filterTab === 'scheduled' ? "No Meetings Scheduled for AI Bot" : "No Meetings Found"}
+              description={
+                filterTab === 'scheduled'
+                  ? "Click 'Attend with AI Live Bot' on any upcoming meeting below to let Deepak's AI Representative represent you in that meeting."
+                  : "Sync your desktop Outlook calendar or add a meeting link to begin live representation and logging."
+              }
               action={
-                <button className="btn btn-primary" style={{ fontWeight: 600 }} onClick={() => setIsDeploying(true)}>
-                  <Plus size={14} /> Connect MS Teams / Zoom Meeting Link
+                <button
+                  className="btn btn-primary"
+                  style={{ fontWeight: 600 }}
+                  onClick={() => syncOutlookCalendarMutation.mutate()}
+                  disabled={syncOutlookCalendarMutation.isPending}
+                >
+                  <CalendarClock size={14} /> Sync Outlook Calendar
                 </button>
               }
             />
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              {meetings.map((m) => (
-                <div
-                  key={m.id}
-                  className={`card card-pad ${selectedMeetingId === m.id ? 'active' : ''}`}
-                  style={{
-                    cursor: 'pointer',
-                    borderLeft: selectedMeetingId === m.id ? '4px solid #c65131' : '1px solid #d8d1c8',
-                  }}
-                  onClick={() => setSelectedMeetingId(m.id)}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
-                    <span className={`badge ${m.botStatus === 'in_call' ? 'green' : 'orange'}`}>
-                      {m.botStatus === 'in_call' ? '🟢 In Call' : m.botStatus}
-                    </span>
-                    <span className="badge">{m.platform.toUpperCase()}</span>
-                  </div>
+              {filteredMeetings.map((m) => {
+                const isSelected = selectedMeetingId === m.id;
+                const isScheduled = m.botStatus === 'scheduled';
+                const isInCall = m.botStatus === 'in_call';
 
-                  <h3 style={{ fontSize: 16, margin: '4px 0 6px', fontWeight: 600 }}>{m.meetingTitle}</h3>
+                return (
+                  <div
+                    key={m.id}
+                    className={`card card-pad ${isSelected ? 'active' : ''}`}
+                    style={{
+                      cursor: 'pointer',
+                      borderLeft: isSelected
+                        ? '4px solid #c65131'
+                        : isScheduled
+                        ? '4px solid #2563eb'
+                        : '1px solid #d8d1c8',
+                      transition: 'all 0.15s ease',
+                    }}
+                    onClick={() => setSelectedMeetingId(m.id)}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                        <span className={`badge ${isInCall ? 'green' : isScheduled ? 'blue' : ''}`}>
+                          {isInCall ? '🟢 In Call' : isScheduled ? '🤖 Live Bot Scheduled' : '⚪ Bot Idle'}
+                        </span>
+                        <span className="badge">{m.platform.toUpperCase()}</span>
+                      </div>
 
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#666' }}>
-                    <Bot size={13} color="#c65131" />
-                    <span>Identity: <strong>{m.botDisplayName}</strong></span>
-                  </div>
+                      {m.scheduledAt && (
+                        <span style={{ fontSize: 11, fontWeight: 600, color: '#2563eb' }}>
+                          📅 {new Date(m.scheduledAt).toLocaleDateString([], { weekday: 'short', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                        </span>
+                      )}
+                    </div>
 
-                  <div className="muted tiny" style={{ marginTop: 8 }}>
-                    Started: {formatDate(m.createdAt)}
+                    <h3 style={{ fontSize: 15, margin: '4px 0 6px', fontWeight: 600, color: '#111' }}>{m.meetingTitle}</h3>
+
+                    {m.location && (
+                      <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>
+                        📍 {m.location}
+                      </div>
+                    )}
+
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12, color: '#666', marginBottom: 10 }}>
+                      <Bot size={13} color="#c65131" />
+                      <span>Identity: <strong>{m.botDisplayName}</strong></span>
+                    </div>
+
+                    {/* Action buttons row */}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid #f0eae1', paddingTop: 8, marginTop: 4 }}>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          type="button"
+                          className={`btn ${isScheduled ? 'btn-outline' : 'btn-primary'}`}
+                          style={{
+                            fontSize: 11,
+                            padding: '3px 8px',
+                            fontWeight: 600,
+                            borderColor: isScheduled ? '#10b981' : undefined,
+                            color: isScheduled ? '#047857' : undefined,
+                            background: isScheduled ? '#f0fdf4' : undefined,
+                          }}
+                          disabled={toggleBotAssignmentMutation.isPending}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            toggleBotAssignmentMutation.mutate({
+                              meetingId: m.id,
+                              newStatus: isScheduled ? 'idle' : 'scheduled',
+                            });
+                          }}
+                        >
+                          {isScheduled ? (
+                            <>
+                              <CheckCircle2 size={12} /> Live Bot Scheduled
+                            </>
+                          ) : (
+                            <>
+                              <Bot size={12} /> Attend with AI Live Bot
+                            </>
+                          )}
+                        </button>
+                      </div>
+
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {m.meetingUrl && (
+                          <a
+                            href={m.meetingUrl}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="btn btn-outline"
+                            style={{ fontSize: 11, padding: '3px 8px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <ExternalLink size={12} /> Join Call
+                          </a>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </div>
@@ -385,18 +598,50 @@ export function LiveMeetings() {
                 <div>
                   <div className="eyebrow">LIVE MEETING CONTROL CENTER</div>
                   <h2 style={{ fontSize: 20, margin: '4px 0' }}>{detailQuery.data.meeting.meetingTitle}</h2>
+                  {detailQuery.data.meeting.scheduledAt && (
+                    <div style={{ fontSize: 12, color: '#2563eb', fontWeight: 600, marginTop: 2 }}>
+                      📅 Scheduled: {formatDate(detailQuery.data.meeting.scheduledAt)}
+                    </div>
+                  )}
                 </div>
-                {detailQuery.data.meeting.botStatus === 'in_call' ? (
-                  <button
-                    className="btn btn-outline"
-                    style={{ color: '#dc2626', borderColor: '#fca5a5' }}
-                    onClick={() => statusMutation.mutate('left')}
-                  >
-                    <PhoneOff size={14} /> Leave Call
-                  </button>
-                ) : (
-                  <span className="badge">Meeting Ended</span>
-                )}
+                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                  {detailQuery.data.meeting.botStatus === 'in_call' ? (
+                    <button
+                      className="btn btn-outline"
+                      style={{ color: '#dc2626', borderColor: '#fca5a5' }}
+                      onClick={() => statusMutation.mutate('left')}
+                    >
+                      <PhoneOff size={14} /> Leave Call
+                    </button>
+                  ) : detailQuery.data.meeting.botStatus === 'scheduled' ? (
+                    <button
+                      className="btn btn-outline"
+                      style={{ borderColor: '#10b981', color: '#047857', background: '#f0fdf4' }}
+                      disabled={toggleBotAssignmentMutation.isPending}
+                      onClick={() =>
+                        toggleBotAssignmentMutation.mutate({
+                          meetingId: detailQuery.data.meeting.id,
+                          newStatus: 'idle',
+                        })
+                      }
+                    >
+                      <CheckCircle2 size={14} /> Bot Scheduled (Click to Unassign)
+                    </button>
+                  ) : (
+                    <button
+                      className="btn btn-primary"
+                      disabled={toggleBotAssignmentMutation.isPending}
+                      onClick={() =>
+                        toggleBotAssignmentMutation.mutate({
+                          meetingId: detailQuery.data.meeting.id,
+                          newStatus: 'scheduled',
+                        })
+                      }
+                    >
+                      <Bot size={14} /> Attend with AI Live Bot
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div style={{ background: '#f4f1eb', padding: '12px 16px', borderRadius: 8, fontSize: 13, marginBottom: 20 }}>
