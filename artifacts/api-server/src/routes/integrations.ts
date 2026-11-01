@@ -597,6 +597,16 @@ router.delete("/atlas/chat-drafts/:id", async (req, res): Promise<void> => {
   res.json({ success: true, id });
 });
 
+// POST clear all chat drafts for this workspace
+router.post("/atlas/chat-drafts/clear", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const { clearAllChatDrafts } = await import("../lib/integrations/chatMonitoringService.js");
+  const count = await clearAllChatDrafts(ctx.workspaceId);
+  res.json({ success: true, clearedCount: count });
+});
+
 // POST sync Teams & Zoom messages from workstation
 router.post("/atlas/integrations/chat/sync", async (req, res): Promise<void> => {
   const ctx = await workspaceContext(req, res);

@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MessageSquare, RefreshCw, Plus, Sparkles, CheckCircle2, Copy, Send, Trash2, Edit3, Bot, Video } from 'lucide-react';
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } from '@/components/atlas-ui';
@@ -132,6 +132,22 @@ export function ChatInbox() {
     },
   });
 
+  const clearAllChatsMutation = useMutation({
+    mutationFn: async () => {
+      const res = await fetch('/api/atlas/chat-drafts/clear', { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to clear chat drafts');
+      return data;
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/chat-drafts'] });
+      alert(`Chat Database Cleared! Purged ${data.clearedCount || 0} messages.`);
+    },
+    onError: (err: any) => {
+      alert(`Clear Error: ${err.message}`);
+    },
+  });
+
   const handleSimulateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!simMessage.trim() || !simSenderName.trim()) return;
@@ -172,6 +188,21 @@ export function ChatInbox() {
             >
               <RefreshCw size={14} className={syncChatMutation.isPending ? 'spin' : ''} />
               {syncChatMutation.isPending ? 'Scanning Chats...' : 'Sync Teams & Zoom Messages'}
+            </button>
+
+            <button
+              className="btn btn-outline"
+              disabled={clearAllChatsMutation.isPending}
+              onClick={() => {
+                if (confirm('Are you sure you want to clear all Teams and Zoom chat data from the database?')) {
+                  clearAllChatsMutation.mutate();
+                }
+              }}
+              style={{ fontWeight: 600, borderColor: '#999', color: '#555' }}
+              title="Purge all chat records from database"
+            >
+              <Trash2 size={14} />
+              {clearAllChatsMutation.isPending ? 'Clearing...' : 'Clear Database'}
             </button>
 
             <button className="btn btn-primary" style={{ fontWeight: 600 }} onClick={() => setIsSimulating(true)}>

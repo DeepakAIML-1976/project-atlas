@@ -1,14 +1,16 @@
-import { eq, or } from "drizzle-orm";
+import { eq, or, and } from "drizzle-orm";
 import {
   db,
   atlasKnowledgeUnitsTable,
   atlasEmailDraftsTable,
+  atlasChatDraftsTable,
   atlasMeetingTriggersTable,
   atlasMeetingsTable,
   atlasLiveMeetingsTable,
   atlasSourcesTable,
   atlasActionsTable,
   atlasDecisionsTable,
+  atlasDelegationRulesTable,
   atlasTwinPreferencesTable,
 } from "@workspace/db";
 import { getLLMConfig } from "./atlasLLM.js";
@@ -37,13 +39,352 @@ export interface VerificationResult {
     knowledgeBankChecked: number;
     heuristicsChecked: number;
   };
+  hierarchyEvidence?: HierarchyEvidence;
   matchedContextSummary: string;
 }
 
+export interface HierarchyEvidence {
+  tier1Emails: Array<{ id: string; subject: string; sender: string; body: string }>;
+  tier2Teams: Array<{ id: string; sender: string; message: string; date: Date }>;
+  tier3Zoom: Array<{ id: string; sender: string; message: string; date: Date }>;
+  tier4Heuristics: Array<{ id: string; topic: string; heuristic: string }>;
+  tier5Sources: Array<{ id: string; title: string; kind: string; snippet: string }>;
+  tier6Meetings: Array<{ id: string; title: string; scheduledAt: Date | null; location: string | null }>;
+  tier7Decisions: Array<{ id: string; title: string; recommendation: string; status: string }>;
+  tier8DelegationRules: Array<{ id: string; domain: string; category: string; maxRiskLevel: string; requiresApproval: boolean }>;
+}
+
 /**
- * 4-Pillar Context Verification & Resolution Engine
- * Cross-references Email Database, Chat Database, Knowledge Bank, and Global Heuristics
- * before generating or framing any response.
+ * Gathers context across all 8 tiers in strict precedence order:
+ * 1) Outlook Email
+ * 2) Microsoft Teams
+ * 3) Zoom
+ * 4) Knowledge and Heuristics
+ * 5) Sources & Project Documents
+ * 6) Meetings Data
+ * 7) Decisions
+ * 8) Delegation Rules
+ */
+export async function gather8TierHierarchyContext(
+  workspaceId: string,
+  messageText: string,
+  senderName: string,
+  senderEmail?: string,
+): Promise<HierarchyEvidence> {
+  const lowerMsg = messageText.toLowerCase();
+  const words = lowerMsg.split(/\s+/).filter((w) => w.length >= 3);
+
+  // 1. Tier 1: Outlook Email
+  const allEmails = await db
+    .select({
+      id: atlasEmailDraftsTable.id,
+      sender: atlasEmailDraftsTable.sender,
+      subject: atlasEmailDraftsTable.subject,
+      incomingBody: atlasEmailDraftsTable.incomingBody,
+    })
+    .from(atlasEmailDraftsTable)
+    .where(eq(atlasEmailDraftsTable.workspaceId, workspaceId))
+    .limit(300);
+
+  const tier1Emails = allEmails
+    .filter((e) => {
+      const s = `${e.subject} ${e.incomingBody} ${e.sender}`.toLowerCase();
+      const hasWordMatch = words.some((w) => s.includes(w));
+      const senderMatch = senderName.length > 2 && e.sender.toLowerCase().includes(senderName.toLowerCase().split(" ")[0]);
+      return hasWordMatch || senderMatch;
+    })
+    .slice(0, 5)
+    .map((e) => ({
+      id: e.id,
+      subject: e.subject,
+      sender: e.sender,
+      body: e.incomingBody.slice(0, 300),
+    }));
+
+  // 2. Tier 2: Microsoft Teams
+  const teamsMessages = await db
+    .select({
+      id: atlasChatDraftsTable.id,
+      senderName: atlasChatDraftsTable.senderName,
+      incomingMessage: atlasChatDraftsTable.incomingMessage,
+      createdAt: atlasChatDraftsTable.createdAt,
+    })
+    .from(atlasChatDraftsTable)
+    .where(and(eq(atlasChatDraftsTable.workspaceId, workspaceId), eq(atlasChatDraftsTable.platform, "teams")))
+    .limit(100);
+
+  const tier2Teams = teamsMessages
+    .filter((t) => {
+      const s = `${t.senderName} ${t.incomingMessage}`.toLowerCase();
+      return words.some((w) => s.includes(w)) || (senderName && t.senderName.toLowerCase().includes(senderName.toLowerCase().split(" ")[0]));
+    })
+    .slice(0, 5)
+    .map((t) => ({
+      id: t.id,
+      sender: t.senderName,
+      message: t.incomingMessage.slice(0, 300),
+      date: t.createdAt,
+    }));
+
+  // 3. Tier 3: Zoom
+  const [zoomChats, meetingTriggers] = await Promise.all([
+    db
+      .select({
+        id: atlasChatDraftsTable.id,
+        senderName: atlasChatDraftsTable.senderName,
+        incomingMessage: atlasChatDraftsTable.incomingMessage,
+        createdAt: atlasChatDraftsTable.createdAt,
+      })
+      .from(atlasChatDraftsTable)
+      .where(and(eq(atlasChatDraftsTable.workspaceId, workspaceId), eq(atlasChatDraftsTable.platform, "zoom")))
+      .limit(100),
+    db
+      .select({
+        id: atlasMeetingTriggersTable.id,
+        speakerName: atlasMeetingTriggersTable.speakerName,
+        questionAsked: atlasMeetingTriggersTable.questionAsked,
+        twinProposedResponse: atlasMeetingTriggersTable.twinProposedResponse,
+        createdAt: atlasMeetingTriggersTable.createdAt,
+      })
+      .from(atlasMeetingTriggersTable)
+      .where(eq(atlasMeetingTriggersTable.workspaceId, workspaceId))
+      .limit(50),
+  ]);
+
+  const tier3Zoom: Array<{ id: string; sender: string; message: string; date: Date }> = [
+    ...zoomChats.map((z) => ({
+      id: z.id,
+      sender: z.senderName,
+      message: z.incomingMessage.slice(0, 300),
+      date: z.createdAt,
+    })),
+    ...meetingTriggers.map((t) => ({
+      id: t.id,
+      sender: t.speakerName || "Meeting Speaker",
+      message: `Q: ${t.questionAsked} -> Response: ${t.twinProposedResponse}`.slice(0, 300),
+      date: t.createdAt,
+    })),
+  ]
+    .filter((z) => {
+      const s = `${z.sender} ${z.message}`.toLowerCase();
+      return words.some((w) => s.includes(w));
+    })
+    .slice(0, 5);
+
+  // 4. Tier 4: Knowledge and Heuristics
+  const allHeuristics = await db
+    .select({
+      id: atlasKnowledgeUnitsTable.id,
+      topic: atlasKnowledgeUnitsTable.topic,
+      heuristic: atlasKnowledgeUnitsTable.heuristic,
+      reasoning: atlasKnowledgeUnitsTable.reasoning,
+    })
+    .from(atlasKnowledgeUnitsTable)
+    .where(or(eq(atlasKnowledgeUnitsTable.workspaceId, workspaceId), eq(atlasKnowledgeUnitsTable.isGlobal, true)));
+
+  const matchingHeuristics = allHeuristics.filter((ku) => {
+    const text = `${ku.topic} ${ku.heuristic || ""} ${ku.reasoning || ""}`.toLowerCase();
+    return words.some((w) => w.length > 3 && text.includes(w));
+  });
+
+  const tier4Heuristics = (matchingHeuristics.length > 0 ? matchingHeuristics : allHeuristics.slice(0, 10)).map((ku) => ({
+    id: ku.id,
+    topic: ku.topic,
+    heuristic: ku.heuristic || ku.reasoning || "",
+  }));
+
+  // 5. Tier 5: Sources & Project Documents
+  const sources = await db
+    .select({
+      id: atlasSourcesTable.id,
+      title: atlasSourcesTable.title,
+      kind: atlasSourcesTable.kind,
+      content: atlasSourcesTable.content,
+    })
+    .from(atlasSourcesTable)
+    .where(eq(atlasSourcesTable.workspaceId, workspaceId))
+    .limit(200);
+
+  const tier5Sources = sources
+    .filter((s) => {
+      const text = `${s.title} ${s.content || ""}`.toLowerCase();
+      return words.some((w) => w.length > 3 && text.includes(w));
+    })
+    .slice(0, 5)
+    .map((s) => ({
+      id: s.id,
+      title: s.title,
+      kind: s.kind,
+      snippet: (s.content || "").slice(0, 300),
+    }));
+
+  // 6. Tier 6: Meetings Data
+  const [liveMeetings, generalMeetings] = await Promise.all([
+    db
+      .select({
+        id: atlasLiveMeetingsTable.id,
+        meetingTitle: atlasLiveMeetingsTable.meetingTitle,
+        scheduledAt: atlasLiveMeetingsTable.scheduledAt,
+        location: atlasLiveMeetingsTable.location,
+      })
+      .from(atlasLiveMeetingsTable)
+      .where(eq(atlasLiveMeetingsTable.workspaceId, workspaceId))
+      .limit(30),
+    db
+      .select({
+        id: atlasMeetingsTable.id,
+        title: atlasMeetingsTable.title,
+        scheduledAt: atlasMeetingsTable.scheduledAt,
+      })
+      .from(atlasMeetingsTable)
+      .where(eq(atlasMeetingsTable.workspaceId, workspaceId))
+      .limit(30),
+  ]);
+
+  const tier6Meetings: Array<{ id: string; title: string; scheduledAt: Date | null; location: string | null }> = [
+    ...liveMeetings.map((m) => ({
+      id: m.id,
+      title: m.meetingTitle,
+      scheduledAt: m.scheduledAt,
+      location: m.location,
+    })),
+    ...generalMeetings.map((m) => ({
+      id: m.id,
+      title: m.title,
+      scheduledAt: m.scheduledAt,
+      location: "Outlook / Teams Calendar",
+    })),
+  ]
+    .filter((m) => {
+      const text = m.title.toLowerCase();
+      return words.some((w) => text.includes(w)) || true;
+    })
+    .slice(0, 5);
+
+  // 7. Tier 7: Decisions
+  const decisions = await db
+    .select({
+      id: atlasDecisionsTable.id,
+      title: atlasDecisionsTable.title,
+      recommendation: atlasDecisionsTable.recommendation,
+      status: atlasDecisionsTable.status,
+    })
+    .from(atlasDecisionsTable)
+    .where(eq(atlasDecisionsTable.workspaceId, workspaceId))
+    .limit(50);
+
+  const tier7Decisions = decisions
+    .filter((d) => {
+      const text = `${d.title} ${d.recommendation}`.toLowerCase();
+      return words.some((w) => w.length > 3 && text.includes(w));
+    })
+    .slice(0, 5)
+    .map((d) => ({
+      id: d.id,
+      title: d.title,
+      recommendation: d.recommendation,
+      status: d.status,
+    }));
+
+  // 8. Tier 8: Delegation Rules
+  const delegationRules = await db
+    .select({
+      id: atlasDelegationRulesTable.id,
+      domain: atlasDelegationRulesTable.domain,
+      category: atlasDelegationRulesTable.category,
+      maxRiskLevel: atlasDelegationRulesTable.maxRiskLevel,
+      requiresHumanApproval: atlasDelegationRulesTable.requiresHumanApproval,
+    })
+    .from(atlasDelegationRulesTable)
+    .where(eq(atlasDelegationRulesTable.workspaceId, workspaceId))
+    .limit(50);
+
+  const tier8DelegationRules = delegationRules.map((r) => ({
+    id: r.id,
+    domain: r.domain,
+    category: r.category,
+    maxRiskLevel: r.maxRiskLevel,
+    requiresApproval: r.requiresHumanApproval,
+  }));
+
+  return {
+    tier1Emails,
+    tier2Teams,
+    tier3Zoom,
+    tier4Heuristics,
+    tier5Sources,
+    tier6Meetings,
+    tier7Decisions,
+    tier8DelegationRules,
+  };
+}
+
+export function format8TierHierarchyPrompt(evidence: HierarchyEvidence): string {
+  const t1 = evidence.tier1Emails.length > 0
+    ? evidence.tier1Emails.map((e) => `  - [Subject: ${e.subject}] From: ${e.sender} -> ${e.body}`).join("\n")
+    : "  - (No matching prior emails found in inbox database)";
+
+  const t2 = evidence.tier2Teams.length > 0
+    ? evidence.tier2Teams.map((t) => `  - [Teams msg from ${t.sender}]: ${t.message}`).join("\n")
+    : "  - (No matching prior Teams messages found)";
+
+  const t3 = evidence.tier3Zoom.length > 0
+    ? evidence.tier3Zoom.map((z) => `  - [Zoom transcript from ${z.sender}]: ${z.message}`).join("\n")
+    : "  - (No matching Zoom meeting chat transcripts found)";
+
+  const t4 = evidence.tier4Heuristics.length > 0
+    ? evidence.tier4Heuristics.map((h) => `  - [Rule: ${h.topic}]: ${h.heuristic}`).join("\n")
+    : "  - (Standard ASME B31.3 / B16.5 piping engineering principles apply)";
+
+  const t5 = evidence.tier5Sources.length > 0
+    ? evidence.tier5Sources.map((s) => `  - [Source: ${s.title} (${s.kind})]: ${s.snippet}`).join("\n")
+    : "  - (No specific project document snippets matched)";
+
+  const t6 = evidence.tier6Meetings.length > 0
+    ? evidence.tier6Meetings.map((m) => `  - [Meeting: ${m.title}] Scheduled: ${m.scheduledAt ? new Date(m.scheduledAt).toISOString() : "TBD"} (Location: ${m.location || "Teams/Zoom"})`).join("\n")
+    : "  - (No matching calendar meetings scheduled)";
+
+  const t7 = evidence.tier7Decisions.length > 0
+    ? evidence.tier7Decisions.map((d) => `  - [Decision: ${d.title}] Recommendation: ${d.recommendation} (Status: ${d.status})`).join("\n")
+    : "  - (No prior engineering decisions recorded)";
+
+  const t8 = evidence.tier8DelegationRules.length > 0
+    ? evidence.tier8DelegationRules.map((r) => `  - [Delegation: ${r.domain} / ${r.category}] Max Risk: ${r.maxRiskLevel}, Requires Human Approval: ${r.requiresApproval}`).join("\n")
+    : "  - (Standard engineering authority: all formal commitments require Deepak's human approval)";
+
+  return `======================================================================
+MANDATORY 8-TIER CONTEXTUAL INFORMATION HIERARCHY (Follow in strict precedence order):
+======================================================================
+1) OUTLOOK EMAIL CONTEXT:
+${t1}
+
+2) MICROSOFT TEAMS CONTEXT:
+${t2}
+
+3) ZOOM CONTEXT:
+${t3}
+
+4) KNOWLEDGE AND HEURISTICS (Deepak's 16 Golden Piping Heuristics & SME Rules):
+${t4}
+
+5) SOURCES (Project 5884/5533 specs, ASME B31.3 / B16.5 codes, P&IDs):
+${t5}
+
+6) MEETINGS DATA (Calendar Meetings, Schedules, Agendas, Participants):
+${t6}
+
+7) DECISIONS (Approved Engineering Decisions & Sign-offs):
+${t7}
+
+8) DELEGATION RULES (Discipline Ownership, Risk Levels & Delegation Boundaries):
+${t8}
+======================================================================`;
+}
+
+/**
+ * 8-Tier Context Verification & Resolution Engine
+ * Cross-references Outlook Emails, Teams, Zoom, Knowledge & Heuristics, Sources,
+ * Meetings, Decisions, and Delegation Rules in strict order of precedence.
  */
 export async function verifyContextAndResolve(query: VerificationQuery): Promise<VerificationResult> {
   const { workspaceId, senderName, senderEmail, messageText, channel, threadHistory = [] } = query;
@@ -63,114 +404,17 @@ export async function verifyContextAndResolve(query: VerificationQuery): Promise
   } catch (_) {}
 
   // -------------------------------------------------------------
-  // PILLAR 1: Check Email Database
+  // GATHER COMPLETE 8-TIER HIERARCHY CONTEXT (In Strict Order)
   // -------------------------------------------------------------
-  const emailRecords = await db
-    .select({
-      id: atlasEmailDraftsTable.id,
-      sender: atlasEmailDraftsTable.sender,
-      subject: atlasEmailDraftsTable.subject,
-      incomingBody: atlasEmailDraftsTable.incomingBody,
-      twinDraftResponse: atlasEmailDraftsTable.twinDraftResponse,
-      status: atlasEmailDraftsTable.status,
-    })
-    .from(atlasEmailDraftsTable)
-    .where(eq(atlasEmailDraftsTable.workspaceId, workspaceId))
-    .limit(1000);
+  const hierarchy = await gather8TierHierarchyContext(workspaceId, messageText, senderName, senderEmail);
 
-  // Filter relevant emails by sender, project keywords, or discussion topics
-  const relevantEmails = emailRecords.filter((e) => {
-    const s = (e.subject + " " + e.incomingBody + " " + e.sender).toLowerCase();
-    const words = lowerMsg.split(/\s+/).filter((w) => w.length >= 3);
-    const hasWordMatch = words.some((w) => s.includes(w));
-    const senderMatch = senderName.length > 2 && e.sender.toLowerCase().includes(senderName.toLowerCase().split(" ")[0]);
-    return hasWordMatch || senderMatch;
-  });
-
-  // -------------------------------------------------------------
-  // PILLAR 2: Check Chat & Meeting Database
-  // -------------------------------------------------------------
-  const meetingTriggers = await db
-    .select({
-      id: atlasMeetingTriggersTable.id,
-      speakerName: atlasMeetingTriggersTable.speakerName,
-      questionAsked: atlasMeetingTriggersTable.questionAsked,
-      twinProposedResponse: atlasMeetingTriggersTable.twinProposedResponse,
-    })
-    .from(atlasMeetingTriggersTable)
-    .where(eq(atlasMeetingTriggersTable.workspaceId, workspaceId))
-    .limit(100);
-
-  const relevantChats = meetingTriggers.filter((t) => {
-    const q = (t.questionAsked + " " + (t.speakerName || "")).toLowerCase();
-    const words = lowerMsg.split(/\s+/).filter((w) => w.length >= 3);
-    return words.some((w) => q.includes(w)) || (t.speakerName && senderName.toLowerCase().includes(t.speakerName.toLowerCase()));
-  });
-
-  // -------------------------------------------------------------
-  // PILLAR 3: Check Knowledge Bank & Action Items
-  // -------------------------------------------------------------
-  const [sources, actions, decisions] = await Promise.all([
-    db
-      .select({ id: atlasSourcesTable.id, title: atlasSourcesTable.title, kind: atlasSourcesTable.kind, content: atlasSourcesTable.content })
-      .from(atlasSourcesTable)
-      .where(eq(atlasSourcesTable.workspaceId, workspaceId))
-      .limit(1000),
-    db
-      .select({ id: atlasActionsTable.id, title: atlasActionsTable.title, owner: atlasActionsTable.owner, status: atlasActionsTable.status })
-      .from(atlasActionsTable)
-      .where(eq(atlasActionsTable.workspaceId, workspaceId))
-      .limit(100),
-    db
-      .select({ id: atlasDecisionsTable.id, title: atlasDecisionsTable.title, domain: atlasDecisionsTable.domain, recommendation: atlasDecisionsTable.recommendation })
-      .from(atlasDecisionsTable)
-      .where(eq(atlasDecisionsTable.workspaceId, workspaceId))
-      .limit(100),
-  ]);
-
-  const relevantSources = sources.filter((src) => {
-    const txt = (src.title + " " + (src.content || "")).toLowerCase();
-    return lowerMsg.split(/\s+/).filter((w) => w.length > 3).some((w) => txt.includes(w));
-  });
-
-  const relevantActions = actions.filter((act) => {
-    const txt = (act.title + " " + (act.owner || "")).toLowerCase();
-    return lowerMsg.split(/\s+/).filter((w) => w.length > 3).some((w) => txt.includes(w));
-  });
-
-  // -------------------------------------------------------------
-  // PILLAR 4: Check Heuristics & SME Rules (Global Core + Workspace Rules)
-  // -------------------------------------------------------------
-  const allHeuristics = await db
-    .select()
-    .from(atlasKnowledgeUnitsTable)
-    .where(or(eq(atlasKnowledgeUnitsTable.workspaceId, workspaceId), eq(atlasKnowledgeUnitsTable.isGlobal, true)));
-
-  const stopWords = new Set([
-    "what", "when", "where", "which", "who", "whom", "this", "that", "these", "those",
-    "from", "with", "into", "during", "before", "after", "above", "below", "between",
-    "have", "has", "had", "does", "done", "will", "would", "shall", "should", "could",
-    "more", "most", "than", "other", "some", "only", "also", "very", "just", "about",
-    "goes", "come", "comes", "must", "part", "both", "whole", "includes", "issue",
-    "different", "matter", "happens", "something", "special", "basis", "account",
-    "piping", "engineering", "standard", "standards", "code", "codes", "industry",
-    "general", "practice", "review", "system", "systems", "design", "line", "lines",
-    "service", "kent", "spec", "specification",
-  ]);
-
-  const queryTokens = new Set(lowerMsg.split(/[^a-z0-9]+/));
-  const matchingHeuristics = allHeuristics.filter((ku) => {
-    const topicWords = Array.from(
-      new Set(
-        (ku.topic || "")
-          .toLowerCase()
-          .split(/[^a-z0-9]+/)
-          .filter((w) => w.length >= 4 && !stopWords.has(w)),
-      ),
-    );
-    const hits = topicWords.filter((w) => queryTokens.has(w));
-    return hits.length >= 2;
-  });
+  const relevantEmails = hierarchy.tier1Emails;
+  const relevantChats = [...hierarchy.tier2Teams, ...hierarchy.tier3Zoom];
+  const relevantSources = hierarchy.tier5Sources;
+  const matchingHeuristics = hierarchy.tier4Heuristics;
+  const relevantMeetings = hierarchy.tier6Meetings;
+  const relevantDecisions = hierarchy.tier7Decisions;
+  const relevantDelegationRules = hierarchy.tier8DelegationRules;
 
   // -------------------------------------------------------------
   // MULTI-TURN & CONTEXT EXTRACTION: Inspect Thread History & Replies
@@ -211,11 +455,12 @@ export async function verifyContextAndResolve(query: VerificationQuery): Promise
       replyText: "i am an AI representative and not authorised to reply personal messsages.",
       category: "personal",
       evidencePillars: {
-        emailsChecked: emailRecords.length,
-        chatsChecked: meetingTriggers.length,
-        knowledgeBankChecked: sources.length + actions.length + decisions.length,
-        heuristicsChecked: allHeuristics.length,
+        emailsChecked: hierarchy.tier1Emails.length,
+        chatsChecked: hierarchy.tier2Teams.length + hierarchy.tier3Zoom.length,
+        knowledgeBankChecked: hierarchy.tier5Sources.length + hierarchy.tier7Decisions.length,
+        heuristicsChecked: hierarchy.tier4Heuristics.length,
       },
+      hierarchyEvidence: hierarchy,
       matchedContextSummary: "Personal social inquiry with no project or engineering keywords.",
     };
   }
@@ -255,11 +500,12 @@ export async function verifyContextAndResolve(query: VerificationQuery): Promise
         replyText,
         category: "project_clarification_needed",
         evidencePillars: {
-          emailsChecked: emailRecords.length,
-          chatsChecked: meetingTriggers.length,
-          knowledgeBankChecked: sources.length + actions.length + decisions.length,
-          heuristicsChecked: allHeuristics.length,
+          emailsChecked: hierarchy.tier1Emails.length,
+          chatsChecked: hierarchy.tier2Teams.length + hierarchy.tier3Zoom.length,
+          knowledgeBankChecked: hierarchy.tier5Sources.length + hierarchy.tier7Decisions.length,
+          heuristicsChecked: hierarchy.tier4Heuristics.length,
         },
+        hierarchyEvidence: hierarchy,
         matchedContextSummary: `Meeting scheduling requested for ${timeMentioned}. Prompting user for Project ID.`,
       };
     } else {
@@ -315,11 +561,12 @@ Calendar Status: The calendar invitation has been generated and dispatched direc
         category: "meeting_scheduling",
         projectIdentified: detectedProject,
         evidencePillars: {
-          emailsChecked: emailRecords.length,
-          chatsChecked: meetingTriggers.length,
-          knowledgeBankChecked: sources.length + actions.length + decisions.length,
-          heuristicsChecked: allHeuristics.length,
+          emailsChecked: hierarchy.tier1Emails.length,
+          chatsChecked: hierarchy.tier2Teams.length + hierarchy.tier3Zoom.length,
+          knowledgeBankChecked: hierarchy.tier5Sources.length + hierarchy.tier7Decisions.length,
+          heuristicsChecked: hierarchy.tier4Heuristics.length,
         },
+        hierarchyEvidence: hierarchy,
         matchedContextSummary: `Meeting confirmed and dispatched to calendar for ${timeMentioned} for Project ${detectedProject}.`,
       };
     }
@@ -353,44 +600,31 @@ Calendar Status: The calendar invitation has been generated and dispatched direc
       replyText,
       category: "project_clarification_needed",
       evidencePillars: {
-        emailsChecked: emailRecords.length,
-        chatsChecked: meetingTriggers.length,
-        knowledgeBankChecked: sources.length + actions.length + decisions.length,
-        heuristicsChecked: allHeuristics.length,
+        emailsChecked: hierarchy.tier1Emails.length,
+        chatsChecked: hierarchy.tier2Teams.length + hierarchy.tier3Zoom.length,
+        knowledgeBankChecked: hierarchy.tier5Sources.length + hierarchy.tier7Decisions.length,
+        heuristicsChecked: hierarchy.tier4Heuristics.length,
       },
+      hierarchyEvidence: hierarchy,
       matchedContextSummary: "Project deliverable query detected without specified Project Number. Prompting user for Project ID.",
     };
   }
 
-  // 4. Technical / Project Query with 4-Pillar Context Grounding
+  // 4. Technical / Project Query with Strict 8-Tier Hierarchy Grounding
   const totalRelevantMatches =
-    relevantEmails.length +
-    relevantChats.length +
-    relevantSources.length +
-    relevantActions.length +
-    matchingHeuristics.length;
+    hierarchy.tier1Emails.length +
+    hierarchy.tier2Teams.length +
+    hierarchy.tier3Zoom.length +
+    hierarchy.tier4Heuristics.length +
+    hierarchy.tier5Sources.length +
+    hierarchy.tier6Meetings.length +
+    hierarchy.tier7Decisions.length +
+    hierarchy.tier8DelegationRules.length;
 
   const isLLMFallback = totalRelevantMatches === 0;
 
   const llm = getLLMConfig();
   let replyText = "";
-
-  const emailsText = relevantEmails.slice(0, 5)
-    .map((e) => `[Email Subject: ${e.subject}] From: ${e.sender} -> ${e.incomingBody.slice(0, 200)}`)
-    .join("\n");
-
-  const chatsText = relevantChats.slice(0, 5)
-    .map((c) => `[Chat/Meeting with ${c.speakerName}]: Question: ${c.questionAsked} -> Response: ${c.twinProposedResponse}`)
-    .join("\n");
-
-  const knowledgeBankText = [
-    ...relevantSources.map((s) => `[Document: ${s.title} (${s.kind})]: ${s.content?.slice(0, 200) || ""}`),
-    ...relevantActions.map((a) => `[Action Item: ${a.title}] Owner: ${a.owner} (Status: ${a.status})`),
-  ].join("\n");
-
-  const heuristicsText = (matchingHeuristics.length > 0 ? matchingHeuristics : allHeuristics.slice(0, 15))
-    .map((ku) => `[Rule Topic: ${ku.topic}] -> Heuristic: ${ku.heuristic || ku.reasoning || ""}`)
-    .join("\n");
 
   if (llm.isConfigured && llm.client) {
     try {
@@ -400,7 +634,7 @@ Calendar Status: The calendar invitation has been generated and dispatched direc
 The owner (${ownerName}) is a Senior Oil & Gas Piping Engineering Subject Matter Expert (SME) at Kent PLC.
 
 ZERO-CONTEXT LLM API FALLBACK PROTOCOL:
-No direct matching records or heuristics were found across the 4 foundational pillars (Emails, Chats, KB, Heuristics).
+No direct matching records or heuristics were found across the 8-tier hierarchy (Emails, Teams, Zoom, Heuristics, Sources, Meetings, Decisions, Delegation Rules).
 As instructed, use first-principles engineering reasoning and professional ASME B31.3 / API 570 practices to generate an authoritative draft reply.
 
 MANDATORY FORMAT:
@@ -408,32 +642,29 @@ Start your response exactly with:
 ${twinSignature}: [Draft generated via LLM First-Principles Reasoning - No direct internal mailbox or project records found]
 
 Provide a detailed, practical technical draft for the owner's review.`
-        : `You are ${twinSignature} operating inside Microsoft Teams, live meetings, and calls.
+        : `You are ${twinSignature} operating inside Microsoft Teams, live meetings, and email.
 The owner (${ownerName}) is a 35-year Senior Oil & Gas Piping Engineering Subject Matter Expert (SME) at Kent PLC.
 
-VERIFICATION PROTOCOL:
-You have cross-referenced the 4 foundational pillars:
-1. EMAIL DATABASE CONTEXT:
-${emailsText || "No prior email records matched."}
-
-2. CHAT & MEETING DATABASE CONTEXT:
-${chatsText || "No prior meeting records matched."}
-
-3. KNOWLEDGE BANK & ACTION ITEMS:
-${knowledgeBankText || "No specific project document matches."}
-
-4. ENGINEERING HEURISTICS (ASME B31.3 / API 570):
-${heuristicsText || "Standard ASME B31.3 / API 570 piping rules apply."}
+${format8TierHierarchyPrompt(hierarchy)}
 
 DETECTED PROJECT: ${detectedProject || "None identified"}
 
-INSTRUCTIONS:
-1. Ground your reply directly in the verified context from emails, chats, documents, and heuristics.
-2. If project status, construction closures, or drawings are discussed and a project was identified, address the exact status, RFIs, and next steps.
-3. If this is a meeting coordination request, confirm the meeting and reference the project context.
-4. If this is a technical piping code question (e.g. ASME B31.3, API 570, hydrotest, wall thickness), provide an authoritative SME engineering answer citing the code clauses and safety checks.
-5. Prepend your reply with "${twinSignature}: ".
-6. If the message is strictly personal/social (lunch, dinner, weekend, non-work social chit-chat), reply EXACTLY with:
+MANDATORY HIERARCHICAL REASONING INSTRUCTIONS:
+1. You MUST follow the 8-tier hierarchy above in strict order of priority (1 down to 8) to synthesize your draft reply:
+   - 1) Outlook Email: Look first for prior email exchanges, transmittals, or correspondence with ${senderName} or on this topic.
+   - 2) Microsoft Teams: Look second for prior Teams chats, channel messages, or DM threads.
+   - 3) Zoom: Look third for Zoom meeting chats or transcripts where this topic was discussed.
+   - 4) Knowledge & Heuristics: Ground your technical piping judgment strictly in Deepak's 16 golden piping engineering heuristics (e.g. wall thickness, minimum straight run, dead legs, severe cyclic conditions, flange ratings).
+   - 5) Sources: Cross-reference project documents (Project 5884 Alky Reactor, Project 5533, ASME B31.3 / B16.5 standards).
+   - 6) Meetings Data: Refer to scheduled/past meetings, dates, or participants if relevant.
+   - 7) Decisions: Adhere to previously approved technical decisions and sign-offs.
+   - 8) Delegation Rules: Respect discipline scope boundaries, risk levels, and human approval limits.
+2. Ground your reply directly in the verified context found across these 8 tiers.
+3. If project status, construction closures, or drawings are discussed and a project was identified, address the exact status, RFIs, and next steps.
+4. If this is a meeting coordination request, confirm the meeting and reference the project context.
+5. If this is a technical piping code question (e.g. ASME B31.3, API 570, hydrotest, wall thickness), provide an authoritative SME engineering answer citing the code clauses and safety checks.
+6. Prepend your reply with "${twinSignature}: ".
+7. If the message is strictly personal/social (lunch, dinner, weekend, non-work social chit-chat), reply EXACTLY with:
 "i am an AI representative and not authorised to reply personal messsages."`;
 
       const res = await llm.client.chat.completions.create({
@@ -458,9 +689,15 @@ INSTRUCTIONS:
   }
 
   if (!replyText) {
-    if (matchingHeuristics.length > 0) {
-      const topRule = matchingHeuristics[0];
+    if (hierarchy.tier4Heuristics.length > 0) {
+      const topRule = hierarchy.tier4Heuristics[0];
       replyText = `${twinSignature}: Based on established engineering heuristics for ${topRule.topic}: ${topRule.heuristic}`;
+    } else if (hierarchy.tier5Sources.length > 0) {
+      const topSource = hierarchy.tier5Sources[0];
+      replyText = `${twinSignature}: Based on ${topSource.title}: ${topSource.snippet.slice(0, 200)}...`;
+    } else if (hierarchy.tier7Decisions.length > 0) {
+      const topDecision = hierarchy.tier7Decisions[0];
+      replyText = `${twinSignature}: Regarding ${topDecision.title}, the approved engineering recommendation is: ${topDecision.recommendation}`;
     } else if (isLLMFallback) {
       replyText = `${twinSignature}: [Draft generated via LLM First-Principles Reasoning - No direct internal mailbox or project records found] Based on general ASME B31.3 piping engineering principles, further design review is recommended.`;
     } else {
@@ -509,13 +746,14 @@ INSTRUCTIONS:
     projectIdentified: detectedProject,
     isLLMFallback,
     evidencePillars: {
-      emailsChecked: emailRecords.length,
-      chatsChecked: meetingTriggers.length,
-      knowledgeBankChecked: sources.length + actions.length + decisions.length,
-      heuristicsChecked: allHeuristics.length,
+      emailsChecked: hierarchy.tier1Emails.length,
+      chatsChecked: hierarchy.tier2Teams.length + hierarchy.tier3Zoom.length,
+      knowledgeBankChecked: hierarchy.tier5Sources.length + hierarchy.tier7Decisions.length,
+      heuristicsChecked: hierarchy.tier4Heuristics.length,
     },
+    hierarchyEvidence: hierarchy,
     matchedContextSummary: isLLMFallback
-      ? "No direct 4-pillar internal records found. Triggered LLM API First-Principles Fallback."
-      : `Emails: ${relevantEmails.length}, Chats: ${relevantChats.length}, KB: ${relevantSources.length + relevantActions.length}, Heuristics: ${matchingHeuristics.length}`,
+      ? "No direct 8-tier hierarchy records found. Triggered LLM API First-Principles Fallback."
+      : `Hierarchy Matched: Emails(${hierarchy.tier1Emails.length}), Teams(${hierarchy.tier2Teams.length}), Zoom(${hierarchy.tier3Zoom.length}), Heuristics(${hierarchy.tier4Heuristics.length}), Sources(${hierarchy.tier5Sources.length}), Meetings(${hierarchy.tier6Meetings.length}), Decisions(${hierarchy.tier7Decisions.length}), Delegation(${hierarchy.tier8DelegationRules.length})`,
   };
 }

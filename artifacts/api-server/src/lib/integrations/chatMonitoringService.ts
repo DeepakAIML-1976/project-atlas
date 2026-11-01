@@ -24,11 +24,93 @@ export interface IngestedChatMessage {
 }
 
 /**
- * Scans local Zoom documents directory for saved meeting chat transcripts
+ * Verifies if a sender name or email represents Deepak Paranjape
+ */
+export function isDeepakIdentity(nameOrEmail?: string | null): boolean {
+  if (!nameOrEmail) return false;
+  const s = nameOrEmail.toLowerCase().trim();
+  return (
+    s.includes("deepak.paranjape") ||
+    s.includes("deepak paranjape") ||
+    s.includes("user_deepak") ||
+    s === "deepak" ||
+    s.includes("dpengineeringservices")
+  );
+}
+
+/**
+ * Checks if a message is directly addressed to Deepak Paranjape.
+ * Rules:
+ * 1. If sent by Deepak, return false (never ingest self-messages).
+ * 2. If it is an explicit 1-on-1 Direct Message (isDirectMessage = true), return true.
+ * 3. If recipient specifically targets Deepak (e.g. Zoom private message), return true.
+ * 4. In group/meeting chats, requires explicit address or @mention:
+ *    - Explicit @mention (@Deepak, @Deepak Paranjape, @deepak.paranjape)
+ *    - Direct salutation at start of message or sentences: "Hi Deepak", "Hello Deepak", "Hey Deepak", "Dear Deepak", "Deepak,", "Deepak:", "Deepak -"
+ *    - In-text mention of deepak.paranjape@kentplc.com
+ * 5. Otherwise returns false (skips general chatter between others).
+ */
+export function isAddressedToDeepak(params: {
+  senderName: string;
+  senderEmail?: string | null;
+  recipientName?: string | null;
+  messageText: string;
+  isDirectMessage?: boolean;
+}): boolean {
+  const { senderName, senderEmail, recipientName, messageText, isDirectMessage } = params;
+
+  // Rule 1: Never ingest self-sent messages
+  if (isDeepakIdentity(senderName) || isDeepakIdentity(senderEmail)) {
+    return false;
+  }
+
+  // Rule 2: Explicit 1-on-1 DM
+  if (isDirectMessage) {
+    return true;
+  }
+
+  // Rule 3: Recipient specifically targets Deepak (e.g. Zoom private message to Deepak)
+  if (recipientName && isDeepakIdentity(recipientName)) {
+    return true;
+  }
+
+  // Rule 4: Group chats / meeting chats: require explicit mention or address
+  const text = messageText.trim();
+  const lower = text.toLowerCase();
+
+  // Explicit @mention
+  if (/@deepak(\b|\s|paranjape)/i.test(text)) {
+    return true;
+  }
+
+  // Email mention
+  if (lower.includes("deepak.paranjape@kentplc.com")) {
+    return true;
+  }
+
+  // Salutation / direct addressing patterns (at start of text or after punctuation/newline)
+  // e.g. "Hi Deepak", "Hello Deepak", "Deepak, what is...", "Deepak: please clarify", "Deepak - can we check..."
+  const addressPattern = /(?:^|[\r\n.!?]\s*)(?:hi|hello|hey|dear)?\s*@?deepak\b(?:\s*paranjape)?(?:\s*[,:\-–—]|\s+(?:please|could|can|what|how|where|when|why|is|are|do|did|will|would|check|confirm|review|verify|note|regards|thanks|thank))/i;
+  if (addressPattern.test(text)) {
+    return true;
+  }
+
+  // Check if message starts directly with "Deepak" followed by punctuation or question
+  if (/^@?deepak\b/i.test(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Scans local Zoom documents directory for saved meeting chat transcripts.
+ * ONLY returns messages directly DMed to Deepak or specifically addressed to him.
  */
 export function scanLocalZoomMeetingChats(documentsDir?: string): Array<{
   chatId: string;
   senderName: string;
+  recipientName?: string;
   incomingMessage: string;
   timestamp: Date;
   rawLine: string;
@@ -41,6 +123,7 @@ export function scanLocalZoomMeetingChats(documentsDir?: string): Array<{
   const results: Array<{
     chatId: string;
     senderName: string;
+    recipientName?: string;
     incomingMessage: string;
     timestamp: Date;
     rawLine: string;
@@ -62,13 +145,33 @@ export function scanLocalZoomMeetingChats(documentsDir?: string): Array<{
         const lines = content.split(/\r?\n/).filter(Boolean);
 
         for (const line of lines) {
-          // Format e.g.: 14:32:05 From John Doe to Everyone: Clarify the flange rating please
-          // or: 14:32:05 From Deepak Paranjape : ...
-          const match = line.match(/^(\d{2}:\d{2}:\d{2})\s+From\s+([^:]+?)(?:\s+to\s+[^:]+)?\s*:\s*(.+)$/i);
+          // Format e.g.:
+          // 14:32:05 From John Doe to Everyone: Clarify the flange rating please
+          // 14:32:05 From John Doe to Deepak Paranjape (Privately): Here is the spec
+          // 14:32:05 From Deepak Paranjape : ...
+          const match = line.match(/^(\d{2}:\d{2}:\d{2})\s+From\s+([^:]+?)(?:\s+to\s+([^:]+?))?\s*:\s*(.+)$/i);
           if (match) {
             const timeStr = match[1];
             const sender = match[2].trim();
-            const message = match[3].trim();
+            const recipient = match[3] ? match[3].trim() : undefined;
+            const message = match[4].trim();
+
+            // Ignore messages sent by Deepak himself
+            if (isDeepakIdentity(sender)) continue;
+
+            const isDirectMessage = Boolean(recipient && isDeepakIdentity(recipient));
+
+            // Strictly filter to messages directly DMed or addressed to Deepak
+            if (
+              !isAddressedToDeepak({
+                senderName: sender,
+                recipientName: recipient,
+                messageText: message,
+                isDirectMessage,
+              })
+            ) {
+              continue;
+            }
 
             const timeParts = timeStr.split(":").map(Number);
             const msgDate = new Date(meetingBaseDate);
@@ -77,6 +180,7 @@ export function scanLocalZoomMeetingChats(documentsDir?: string): Array<{
             results.push({
               chatId: entry.name,
               senderName: sender,
+              recipientName: recipient,
               incomingMessage: message,
               timestamp: msgDate,
               rawLine: line,
@@ -209,6 +313,17 @@ export async function generateDraftForChatMessage(
 }
 
 /**
+ * Purges all chat drafts for a given workspace
+ */
+export async function clearAllChatDrafts(workspaceId: string): Promise<number> {
+  const deleted = await db
+    .delete(atlasChatDraftsTable)
+    .where(eq(atlasChatDraftsTable.workspaceId, workspaceId))
+    .returning();
+  return deleted.length;
+}
+
+/**
  * Sync all local and cloud messages for Teams and Zoom
  */
 export async function syncTeamsAndZoomMessages(workspaceId: string): Promise<{
@@ -219,13 +334,10 @@ export async function syncTeamsAndZoomMessages(workspaceId: string): Promise<{
   let teamsCount = 0;
   let zoomCount = 0;
 
-  // 1. Scan Zoom local chat logs
+  // 1. Scan Zoom local chat logs (already strictly filtered by isAddressedToDeepak)
   try {
     const zoomChats = scanLocalZoomMeetingChats();
     for (const chat of zoomChats) {
-      // Don't ingest messages sent by Deepak himself
-      if (chat.senderName.toLowerCase().includes("deepak")) continue;
-
       const { isNew } = await ingestCleanChatMessage({
         workspaceId,
         platform: "zoom",
@@ -245,13 +357,15 @@ export async function syncTeamsAndZoomMessages(workspaceId: string): Promise<{
     const { resolveMSGraphToken } = await import("./msGraph.js");
     const graphToken = await resolveMSGraphToken();
     if (graphToken) {
-      const chatsRes = await fetch("https://graph.microsoft.com/v1.0/chats?$top=10", {
+      const chatsRes = await fetch("https://graph.microsoft.com/v1.0/chats?$top=15", {
         headers: { Authorization: `Bearer ${graphToken}` },
       });
       if (chatsRes.ok) {
         const chatsData = (await chatsRes.json()) as { value?: any[] };
         for (const c of chatsData.value || []) {
-          const msgsRes = await fetch(`https://graph.microsoft.com/v1.0/chats/${c.id}/messages?$top=5`, {
+          const isDirectMessage = c.chatType === "oneOnOne";
+
+          const msgsRes = await fetch(`https://graph.microsoft.com/v1.0/chats/${c.id}/messages?$top=10`, {
             headers: { Authorization: `Bearer ${graphToken}` },
           });
           if (!msgsRes.ok) continue;
@@ -260,7 +374,20 @@ export async function syncTeamsAndZoomMessages(workspaceId: string): Promise<{
             const sender = m.from?.user?.displayName || "Teams Colleague";
             const email = m.from?.user?.userPrincipalName || "";
             const body = (m.body?.content || "").replace(/<[^>]+>/g, " ").trim();
-            if (!body || sender.toLowerCase().includes("deepak")) continue;
+
+            if (!body) continue;
+
+            // Strictly filter: 1-on-1 DM to Deepak OR specifically addressed/mentioned
+            if (
+              !isAddressedToDeepak({
+                senderName: sender,
+                senderEmail: email,
+                messageText: body,
+                isDirectMessage,
+              })
+            ) {
+              continue;
+            }
 
             const { isNew } = await ingestCleanChatMessage({
               workspaceId,

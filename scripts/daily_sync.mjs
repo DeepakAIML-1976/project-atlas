@@ -301,9 +301,27 @@ async function executeSync() {
       meetingsInserted++;
     }
 
-    // 3. INGEST ZOOM & TEAMS CHAT MESSAGES
+    // 3. INGEST ZOOM & TEAMS CHAT MESSAGES (Filtered to DMs & addressed to Deepak)
     let chatMessagesInserted = 0;
     try {
+      const isDeepak = (s) => {
+        if (!s) return false;
+        const l = s.toLowerCase();
+        return l.includes("deepak.paranjape") || l.includes("deepak paranjape") || l === "deepak" || l.includes("dpengineering");
+      };
+
+      const isTargeted = (sender, recipient, msg) => {
+        if (isDeepak(sender)) return false;
+        if (recipient && isDeepak(recipient)) return true;
+        const text = msg.trim();
+        if (/@deepak(\b|\s|paranjape)/i.test(text)) return true;
+        if (text.toLowerCase().includes("deepak.paranjape@kentplc.com")) return true;
+        const addressPattern = /(?:^|[\r\n.!?]\s*)(?:hi|hello|hey|dear)?\s*@?deepak\b(?:\s*paranjape)?(?:\s*[,:\-–—]|\s+(?:please|could|can|what|how|where|when|why|is|are|do|did|will|would|check|confirm|review|verify|note|regards|thanks|thank))/i;
+        if (addressPattern.test(text)) return true;
+        if (/^@?deepak\b/i.test(text)) return true;
+        return false;
+      };
+
       const zoomBase = process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "Documents", "Zoom") : "";
       if (fs.existsSync(zoomBase)) {
         const folders = fs.readdirSync(zoomBase, { withFileTypes: true });
@@ -313,11 +331,14 @@ async function executeSync() {
           if (!fs.existsSync(chatFile)) continue;
           const lines = fs.readFileSync(chatFile, "utf8").split(/\r?\n/).filter(Boolean);
           for (const line of lines) {
-            const match = line.match(/^(\d{2}:\d{2}:\d{2})\s+From\s+([^:]+?)(?:\s+to\s+[^:]+)?\s*:\s*(.+)$/i);
+            const match = line.match(/^(\d{2}:\d{2}:\d{2})\s+From\s+([^:]+?)(?:\s+to\s+([^:]+?))?\s*:\s*(.+)$/i);
             if (match) {
               const sender = match[2].trim();
-              const msg = match[3].trim();
-              if (sender.toLowerCase().includes("deepak")) continue;
+              const recipient = match[3] ? match[3].trim() : "";
+              const msg = match[4].trim();
+
+              if (!isTargeted(sender, recipient, msg)) continue;
+
               const msgId = crypto.createHash("sha256").update("zoom:::" + f.name + ":::" + sender + ":::" + msg).digest("hex").substring(0, 32);
 
               const existCheck = await client.query("SELECT id FROM atlas_chat_drafts WHERE workspace_id = $1 AND message_id = $2", [WORKSPACE_ID, msgId]);

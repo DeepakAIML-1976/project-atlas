@@ -8,6 +8,7 @@ import {
   db,
 } from "@workspace/db";
 import { getLLMConfig } from "./atlasLLM.js";
+import { gather8TierHierarchyContext, format8TierHierarchyPrompt } from "./contextVerificationEngine.js";
 
 interface DraftGenerationResult {
   twinDraftResponse: string;
@@ -94,6 +95,9 @@ export async function generateDraftReply(
   const firstName = extractFirstName(sender);
   const ownerName = twinSignature.replace(/'s AI Representative.*$/i, "").trim() || "Deepak Paranjape";
 
+  // Gather complete 8-tier hierarchy context
+  const hierarchy = await gather8TierHierarchyContext(workspaceId, `${subject} ${incomingBody}`, sender);
+
   if (llm.isConfigured && llm.client) {
     try {
       const fallbackNotice = isLLMFallback
@@ -113,7 +117,21 @@ ${twinSignature}: [Draft generated via LLM First-Principles Reasoning - No direc
             role: "system",
             content: `You are ${twinSignature}. The owner (${ownerName}) is a 35-year Senior Oil & Gas Piping Engineering Subject Matter Expert (SME) and Lead Engineer at Kent PLC.
 ${fallbackNotice}
+
+${format8TierHierarchyPrompt(hierarchy)}
+
 Your mission is to read incoming corporate emails carefully and draft HIGHLY CONTEXTUAL, LOGICAL, and RELEVANT responses that strictly address the specific subject matter, project details, and purpose of the email.
+
+MANDATORY HIERARCHICAL REASONING INSTRUCTIONS:
+Follow this 8-tier hierarchy in strict priority order (1 down to 8) to contextualize and ground your draft email response:
+1) Outlook Email: Look first at prior email exchanges, threads, transmittals, and client correspondence with ${sender}.
+2) Microsoft Teams: Look second for related Teams chats and DM threads.
+3) Zoom: Look third for Zoom meeting chats or transcripts where this was discussed.
+4) Knowledge & Heuristics: Ground your technical piping judgment strictly in Deepak's 16 golden piping engineering heuristics.
+5) Sources: Cross-reference project documents (Project 5884 Alky Reactor, Project 5533, ASME B31.3 / B16.5 standards).
+6) Meetings Data: Refer to scheduled/past meetings, dates, or participants if relevant.
+7) Decisions: Adhere to previously approved technical decisions and sign-offs.
+8) Delegation Rules: Respect discipline scope boundaries, risk levels, and human approval limits.
 
 RULES FOR DRAFTING:
 1. READ & UNDERSTAND THE INCOMING EMAIL CONTEXT:
@@ -122,7 +140,7 @@ RULES FOR DRAFTING:
    - Identify the exact request, question, deliverable, or announcement.
 2. TAILOR THE CONTENT BY CATEGORY:
    - TECHNICAL & INTERFACE (e.g. reactor platform leg forces, tag files, flange ratings, stress analysis, 30% model review):
-     * Provide a precise, senior engineering assessment.
+     * Provide a precise, senior engineering assessment grounded in the 16 golden piping heuristics.
      * Confirm whether you are reviewing the load cases/calculations against piping stress models and nozzle allowable limits.
      * Apply relevant ASME B31.3 / API 570 / NACE standards where appropriate.
    - ADMINISTRATIVE / COMPLIANCE / HR (e.g. Saudi Aramco roster documentation, CV updates, form submissions):
@@ -142,15 +160,12 @@ RULES FOR DRAFTING:
      ${ownerName}
      Senior Piping Engineering Specialist | Kent
 
-AVAILABLE ENGINEERING HEURISTICS (Only use if genuinely relevant to the technical query):
-${heuristicsSummary || "Standard ASME B31.3 / API 570 piping engineering principles."}
-
 ${styleExamples.length ? `${ownerName}'s actual tone examples:\n${styleExamples.map((s, i) => `--- Example ${i + 1} ---\n${s}`).join("\n")}\n` : ""}
 
 Respond with valid JSON:
 {
   "draftResponse": "Complete, polished response email ready to send",
-  "reasoning": "Clear explanation of how you analyzed the email context and why this specific response was drafted",
+  "reasoning": "Clear explanation of how you analyzed the email context using the 8-tier hierarchy and why this specific response was drafted",
   "confidence": 0.95
 }`,
           },
