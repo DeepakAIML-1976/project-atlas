@@ -61,143 +61,15 @@ export async function runTeamsSyncCycle(): Promise<SyncStatusResult> {
       accountsByWs.set(acc.workspaceId, list);
     }
 
-    // 2. Obtain Microsoft Graph Token for chat polling
-    const graphToken = await resolveMSGraphToken();
-    if (!graphToken) {
-      logger.debug("Microsoft Graph token unavailable during sync cycle, will retry next tick");
-      return getSyncStatus();
-    }
-
-    // 3. Query all user/group chats accessible to the Digital Twin integration
-    const chatsRes = await fetch("https://graph.microsoft.com/v1.0/chats?$top=20", {
-      headers: { Authorization: `Bearer ${graphToken}` },
-    });
-
-    let chats: any[] = [];
-    if (chatsRes.ok) {
-      const chatsData = (await chatsRes.json()) as { value?: any[] };
-      chats = chatsData.value || [];
-    } else {
-      // Fallback: query via user chats endpoint if tenant client_credentials requires /users/{id}/chats
-      const userGuid = process.env.MS_GRAPH_USER_GUID || "534a887e-47ef-435c-bbc6-90ac75b9f5b4";
-      const userChatsRes = await fetch(`https://graph.microsoft.com/v1.0/users/${userGuid}/chats?$top=20`, {
-        headers: { Authorization: `Bearer ${graphToken}` },
-      });
-      if (userChatsRes.ok) {
-        const uData = (await userChatsRes.json()) as { value?: any[] };
-        chats = uData.value || [];
-      }
-    }
-
-    // 4. Iterate over discovered chats and process messages
-    for (const chat of chats) {
-      const msgsRes = await fetch(`https://graph.microsoft.com/v1.0/chats/${chat.id}/messages?$top=5`, {
-        headers: { Authorization: `Bearer ${graphToken}` },
-      });
-      if (!msgsRes.ok) continue;
-
-      const msgsData = (await msgsRes.json()) as { value?: any[] };
-      const rawMsgs = msgsData.value || [];
-
-      for (const msg of rawMsgs) {
-        if (!msg.id || msg.messageType === "systemEventMessage" || !msg.body?.content) continue;
-
-        // Skip self-replies from any AI representative to prevent feedback loops
-        const bodyContent = msg.body.content as string;
-        if (
-          bodyContent.includes("AI Representative") ||
-          bodyContent.includes("my twin is currently offline") ||
-          bodyContent.includes("i am an AI representative and not authorised") ||
-          bodyContent.includes("🔔 [Digital Twin: New Draft Awaiting Approval]")
-        ) {
-          continue;
-        }
-
-        // Check if message was already handled
-        if (processedMessageIds.has(msg.id)) continue;
-
-        // Verify in database if not in memory
-        const existingDraft = await db
-          .select({ id: atlasChatDraftsTable.id })
-          .from(atlasChatDraftsTable)
-          .where(eq(atlasChatDraftsTable.messageId, msg.id))
-          .limit(1);
-
-        if (existingDraft.length > 0) {
-          processedMessageIds.add(msg.id);
-          continue;
-        }
-
-        // Clean message text
-        const cleanText = bodyContent.replace(/<[^>]+>/g, "").trim();
-        if (!cleanText) continue;
-
-        const senderName = msg.from?.user?.displayName || "Colleague";
-        const senderEmail = msg.from?.user?.email || msg.from?.user?.userPrincipalName || "";
-
-        // Resolve sender email accurately from Graph message or display name
-        let resolvedSenderEmail = senderEmail;
-        if (!resolvedSenderEmail) {
-          const nameLower = senderName.toLowerCase();
-          if (nameLower.includes("deepak")) {
-            resolvedSenderEmail = "deepak.paranjape@kentplc.com";
-          } else if (nameLower.includes("sunil")) {
-            resolvedSenderEmail = "sunil.hiremath@kentplc.com";
-          } else if (nameLower.includes("samar")) {
-            resolvedSenderEmail = "samar@kentplc.com";
-          } else if (nameLower.includes("govind")) {
-            resolvedSenderEmail = "govind.hegde@kentplc.com";
-          }
-        }
-
-        // CRITICAL RULE 1: NEVER INGEST MESSAGES ORIGINATED BY DEEPAK PARANJAPE
-        const { isDeepakIdentity, isAddressedToDeepak, ingestCleanChatMessage } = await import("./chatMonitoringService.js");
-        if (isDeepakIdentity(senderName) || isDeepakIdentity(resolvedSenderEmail)) {
-          processedMessageIds.add(msg.id);
-          continue;
-        }
-
-        // CRITICAL RULE 2: ONLY INGEST 1-ON-1 DMS TO DEEPAK OR MESSAGES SPECIFICALLY ADDRESSED TO DEEPAK
-        const isDirectMessage = chat.chatType === "oneOnOne";
-        if (
-          !isAddressedToDeepak({
-            senderName,
-            senderEmail: resolvedSenderEmail,
-            messageText: cleanText,
-            isDirectMessage,
-          })
-        ) {
-          processedMessageIds.add(msg.id);
-          continue;
-        }
-
-        logger.info({
-          chatId: chat.id,
-          messageId: msg.id,
-          senderName,
-          senderEmail: resolvedSenderEmail,
-          text: cleanText.slice(0, 60),
-        }, "[TEAMS UNIVERSAL SYNC] New incoming message addressed to Deepak detected");
-
-        // 5. Dynamic Workspace Resolution:
-        // Chats polled for Deepak's Microsoft account belong to Deepak's workspace.
+    // Desktop Teams Application Sync (when running on workstation)
+    if (process.platform === "win32") {
+      const { syncFromDesktopTeamsApp, checkSystemTasks } = await import("./desktopTeamsParser.js");
+      const tasks = checkSystemTasks();
+      if (tasks.teams) {
         let targetWorkspace = allWorkspaces.find((w) => w.name.toLowerCase().includes("deepak")) || allWorkspaces[0];
         const targetWorkspaceId = targetWorkspace?.id || "1a39970a-abf0-48c3-8b89-08b669e80bbe";
-
-        // 6. Ingest cleanly WITHOUT auto-generating draft replies (user will selectively request draft)
-        await ingestCleanChatMessage({
-          workspaceId: targetWorkspaceId,
-          platform: "teams",
-          chatId: chat.topic || chat.id,
-          messageId: msg.id,
-          senderName,
-          senderEmail: resolvedSenderEmail,
-          incomingMessage: cleanText,
-          createdAt: msg.createdDateTime ? new Date(msg.createdDateTime) : new Date(),
-        });
-
-        processedMessageIds.add(msg.id);
-        totalProcessedMessages++;
+        const newCount = await syncFromDesktopTeamsApp(targetWorkspaceId);
+        totalProcessedMessages += newCount;
       }
     }
 

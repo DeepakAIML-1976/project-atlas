@@ -56,7 +56,13 @@ export function ChatInbox() {
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/chat-drafts'] });
-      alert(`Chat Message Sync Complete!\n\nIngested ${data.totalNew || 0} new message(s) (Teams: ${data.teamsCount || 0}, Zoom: ${data.zoomCount || 0}).`);
+      if (data.alertMessage) {
+        alert(`Application Status Notice:\n\n${data.alertMessage}`);
+      } else if (data.isCloud) {
+        alert(`Desktop Application Sync Active!\n\nActive Messages in Inbox: ${data.teamsCount + data.zoomCount} (Teams: ${data.teamsCount}, Zoom: ${data.zoomCount}).\n\nIncoming messages from your running Microsoft Teams and Zoom applications on your system sync directly into this inbox.`);
+      } else {
+        alert(`Chat Message Sync Complete!\n\nIngested ${data.totalNew || 0} new message(s) directly from your running desktop applications (Teams: ${data.teamsCount || 0}, Zoom: ${data.zoomCount || 0}).`);
+      }
     },
     onError: (err: any) => {
       alert(`Sync Notice: ${err.message}`);

@@ -1,4 +1,4 @@
-﻿import { useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, RefreshCw, X, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react';
 
@@ -108,11 +108,15 @@ export function ClientAppHealthBanner() {
             <p style={{ margin: '4px 0 8px', fontSize: 13, lineHeight: 1.45, color: '#374151' }}>
               {isOutlookDown ? (
                 <strong style={{ color: '#b91c1c' }}>
-                  Warning: Microsoft Outlook is currently closed on your system. There will NOT be any email or calendar ingestion done until Outlook (<code>deepak.paranjape@kentplc.com</code>) is opened and active.
+                  Warning: Microsoft Outlook is closed in your system tasks. Email and calendar ingestion is paused until Outlook (<code>deepak.paranjape@kentplc.com</code>) is opened.
+                </strong>
+              ) : isTeamsDown || isZoomDown ? (
+                <strong style={{ color: '#b45309' }}>
+                  Notice: {isTeamsDown ? 'Microsoft Teams' : ''}{isTeamsDown && isZoomDown ? ' and ' : ''}{isZoomDown ? 'Zoom Workplace' : ''} is not seen in your system tasks. Ingestion for those platforms is paused until the desktop apps are opened.
                 </strong>
               ) : (
                 <span>
-                  Notice: Outlook is active, but one or more meeting applications (Teams/Zoom) are closed on your workstation. Live meeting bot attendance may be unavailable for those platforms.
+                  All required applications (Outlook, Teams, Zoom) are running in system tasks and ready for ingestion.
                 </span>
               )}
             </p>
@@ -153,7 +157,7 @@ export function ClientAppHealthBanner() {
                 >
                   {isTeamsDown ? <AlertTriangle size={13} color="#d97706" /> : <CheckCircle2 size={13} color="#16a34a" />}
                   <span>
-                    <strong>Teams:</strong> {isTeamsDown ? 'Closed (Live Bot Offline)' : 'Running (Live Bot Ready)'}
+                    <strong>Teams:</strong> {isTeamsDown ? 'Closed (No Ingestion)' : 'Running (Ingestion Active)'}
                   </span>
                 </div>
 
@@ -165,14 +169,14 @@ export function ClientAppHealthBanner() {
                     gap: 6,
                     padding: '4px 10px',
                     borderRadius: 6,
-                    background: isZoomDown ? '#f3f4f6' : '#f0fdf4',
-                    border: `1px solid ${isZoomDown ? '#e5e7eb' : '#bbf7d0'}`,
+                    background: isZoomDown ? '#fef3c7' : '#f0fdf4',
+                    border: `1px solid ${isZoomDown ? '#fde68a' : '#bbf7d0'}`,
                     fontSize: 12,
                   }}
                 >
-                  {isZoomDown ? <span style={{ color: '#9ca3af' }}>⚪</span> : <CheckCircle2 size={13} color="#16a34a" />}
+                  {isZoomDown ? <AlertTriangle size={13} color="#d97706" /> : <CheckCircle2 size={13} color="#16a34a" />}
                   <span>
-                    <strong>Zoom:</strong> {isZoomDown ? 'Closed' : 'Running (Ready)'}
+                    <strong>Zoom:</strong> {isZoomDown ? 'Closed (No Ingestion)' : 'Running (Ingestion Active)'}
                   </span>
                 </div>
               </div>

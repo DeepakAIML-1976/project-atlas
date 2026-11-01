@@ -612,9 +612,45 @@ router.post("/atlas/integrations/chat/sync", async (req, res): Promise<void> => 
   const ctx = await workspaceContext(req, res);
   if (!ctx) return;
 
-  const { syncTeamsAndZoomMessages } = await import("../lib/integrations/chatMonitoringService.js");
-  const report = await syncTeamsAndZoomMessages(ctx.workspaceId);
-  res.json(report);
+  if (process.platform === "win32") {
+    const { syncTeamsAndZoomMessages } = await import("../lib/integrations/chatMonitoringService.js");
+    const report = await syncTeamsAndZoomMessages(ctx.workspaceId);
+    res.json(report);
+  } else {
+    // Cloud/Render environment: read desktop application health and synced messages from Supabase
+    try {
+      const { getClientAppHealth } = await import("../lib/integrations/appHealthService.js");
+      const health = await getClientAppHealth(ctx.workspaceId);
+
+      const { db, atlasChatDraftsTable } = await import("@workspace/db");
+      const { eq } = await import("drizzle-orm");
+      const allDrafts = await db
+        .select()
+        .from(atlasChatDraftsTable)
+        .where(eq(atlasChatDraftsTable.workspaceId, ctx.workspaceId));
+
+      const teamsCount = allDrafts.filter((d) => d.platform === "teams").length;
+      const zoomCount = allDrafts.filter((d) => d.platform === "zoom").length;
+
+      let alertMessage = "";
+      if (!health.apps.teams.running) {
+        alertMessage = "Microsoft Teams is not running in your workstation's system tasks. Please open the Teams desktop app to ingest messages.";
+      } else if (!health.apps.zoom.running) {
+        alertMessage = "Zoom Workplace is not running in your workstation's system tasks. Please open the Zoom desktop app to ingest meeting chats.";
+      }
+
+      res.json({
+        teamsCount,
+        zoomCount,
+        totalNew: 0,
+        isCloud: true,
+        health,
+        alertMessage,
+      });
+    } catch (err: any) {
+      res.json({ teamsCount: 0, zoomCount: 0, totalNew: 0 });
+    }
+  }
 });
 
 export default router;
