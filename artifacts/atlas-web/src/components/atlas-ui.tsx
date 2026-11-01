@@ -20,6 +20,7 @@ const links = [
 ];
 
 import { ProfileSwitcher } from '@/components/profile-switcher';
+import { ClientAppHealthBanner } from '@/components/ClientAppHealthBanner';
 
 export function Brand({ light = false }: { light?:boolean }) {
   return <Link href="/" className="brand" data-testid="link-atlas-home"><span className="brand-mark">a</span><span className="brand-text" style={{color:light?'#292538':undefined}}>atlas<span style={{color:'#c97b59'}}>.</span></span></Link>;
@@ -63,6 +64,7 @@ export function Shell({ children, workspace }: { children:ReactNode; workspace?:
           <ProfileSwitcher variant="topbar"/>
         </div>
       </header>
+      <ClientAppHealthBanner />
       <main className="main-content reveal">{children}</main>
     </div>
   </div>;

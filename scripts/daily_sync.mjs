@@ -220,6 +220,26 @@ async function executeSync() {
 
   const client = await pool.connect();
   try {
+    // 0. RECORD WORKSTATION APP HEALTH (Outlook, Teams, Zoom)
+    try {
+      const taskOut = execSync('tasklist /FO CSV /NH', { encoding: 'utf8', windowsHide: true }).toLowerCase();
+      const ol = taskOut.includes('outlook.exe');
+      const tm = taskOut.includes('teams.exe') || taskOut.includes('ms-teams.exe');
+      const zm = taskOut.includes('zoom.exe');
+      const healthId = "health_" + WORKSPACE_ID;
+      await client.query(`
+        INSERT INTO atlas_app_health (id, workspace_id, device_name, outlook_running, teams_running, zoom_running, account_email, last_heartbeat)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+        ON CONFLICT (id) DO UPDATE SET
+          outlook_running = EXCLUDED.outlook_running,
+          teams_running = EXCLUDED.teams_running,
+          zoom_running = EXCLUDED.zoom_running,
+          last_heartbeat = NOW()
+      `, [healthId, WORKSPACE_ID, 'Windows Workstation', ol, tm, zm, TARGET_ACCOUNT]);
+    } catch (e) {
+      console.warn("Could not record app health:", e.message);
+    }
+
     // 1. INGEST EMAILS (cleanly, without automated draft)
     const existingEmailsRes = await client.query(
       "SELECT subject, sender, incoming_body FROM atlas_email_drafts WHERE workspace_id = $1",

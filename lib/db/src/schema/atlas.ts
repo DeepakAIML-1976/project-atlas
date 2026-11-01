@@ -449,6 +449,24 @@ export const atlasTwinPreferencesTable = pgTable(
   ],
 );
 
+export const atlasAppHealthTable = pgTable(
+  "atlas_app_health",
+  {
+    id: id(),
+    workspaceId: text("workspace_id")
+      .notNull()
+      .references(() => atlasWorkspacesTable.id, { onDelete: "cascade" }),
+    deviceName: text("device_name").notNull().default("Workstation"),
+    outlookRunning: boolean("outlook_running").notNull().default(false),
+    teamsRunning: boolean("teams_running").notNull().default(false),
+    zoomRunning: boolean("zoom_running").notNull().default(false),
+    accountEmail: text("account_email").notNull().default("deepak.paranjape@kentplc.com"),
+    lastHeartbeat: timestamp("last_heartbeat", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: createdAt(),
+  },
+  (table) => [index("atlas_app_health_workspace_idx").on(table.workspaceId)],
+);
+
 export const atlasChatDraftsTable = pgTable(
   "atlas_chat_drafts",
   {
@@ -518,6 +536,7 @@ export const insertAtlasActivitySchema = createInsertSchema(atlasActivityTable).
 export const insertAtlasSocraticInterviewSchema = createInsertSchema(atlasSocraticInterviewsTable).omit({ id: true, createdAt: true });
 export const insertAtlasBenchmarkResultSchema = createInsertSchema(atlasBenchmarkResultsTable).omit({ id: true, createdAt: true });
 export const insertAtlasLinkedAccountSchema = createInsertSchema(atlasLinkedAccountsTable).omit({ id: true, createdAt: true });
+export const insertAtlasAppHealthSchema = createInsertSchema(atlasAppHealthTable).omit({ id: true, createdAt: true });
 
 export type AtlasWorkspace = typeof atlasWorkspacesTable.$inferSelect;
 export type AtlasMembership = typeof atlasMembershipsTable.$inferSelect;
@@ -537,6 +556,7 @@ export type AtlasActivity = typeof atlasActivityTable.$inferSelect;
 export type AtlasSocraticInterview = typeof atlasSocraticInterviewsTable.$inferSelect;
 export type AtlasBenchmarkResult = typeof atlasBenchmarkResultsTable.$inferSelect;
 export type AtlasLinkedAccount = typeof atlasLinkedAccountsTable.$inferSelect;
+export type AtlasAppHealth = typeof atlasAppHealthTable.$inferSelect;
 export type AtlasTwinPreference = typeof atlasTwinPreferencesTable.$inferSelect;
 export type AtlasChatDraft = typeof atlasChatDraftsTable.$inferSelect;
 export type InsertAtlasWorkspace = z.infer<typeof insertAtlasWorkspaceSchema>;
