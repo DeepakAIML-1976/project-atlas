@@ -1,6 +1,8 @@
 import { spawn, execSync } from "node:child_process";
 import { createRequire } from "module";
 import crypto from "crypto";
+import fs from "node:fs";
+import path from "node:path";
 
 const require = createRequire("C:/Users/dpeng/Documents/Digital-Twin-Suite/lib/db/package.json");
 const pg = require("pg");
@@ -299,9 +301,45 @@ async function executeSync() {
       meetingsInserted++;
     }
 
+    // 3. INGEST ZOOM & TEAMS CHAT MESSAGES
+    let chatMessagesInserted = 0;
+    try {
+      const zoomBase = process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "Documents", "Zoom") : "";
+      if (fs.existsSync(zoomBase)) {
+        const folders = fs.readdirSync(zoomBase, { withFileTypes: true });
+        for (const f of folders) {
+          if (!f.isDirectory()) continue;
+          const chatFile = path.join(zoomBase, f.name, "meeting_saved_chat.txt");
+          if (!fs.existsSync(chatFile)) continue;
+          const lines = fs.readFileSync(chatFile, "utf8").split(/\r?\n/).filter(Boolean);
+          for (const line of lines) {
+            const match = line.match(/^(\d{2}:\d{2}:\d{2})\s+From\s+([^:]+?)(?:\s+to\s+[^:]+)?\s*:\s*(.+)$/i);
+            if (match) {
+              const sender = match[2].trim();
+              const msg = match[3].trim();
+              if (sender.toLowerCase().includes("deepak")) continue;
+              const msgId = crypto.createHash("sha256").update("zoom:::" + f.name + ":::" + sender + ":::" + msg).digest("hex").substring(0, 32);
+
+              const existCheck = await client.query("SELECT id FROM atlas_chat_drafts WHERE workspace_id = $1 AND message_id = $2", [WORKSPACE_ID, msgId]);
+              if (existCheck.rows.length === 0) {
+                await client.query(`
+                  INSERT INTO atlas_chat_drafts (id, workspace_id, platform, chat_id, message_id, sender_name, incoming_message, twin_draft_response, status, created_at)
+                  VALUES ($1, $2, 'zoom', $3, $4, $5, $6, '', 'ingested', NOW())
+                `, [crypto.randomUUID(), WORKSPACE_ID, f.name, msgId, sender, msg]);
+                chatMessagesInserted++;
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.warn("Notice: Zoom chat scan:", e.message);
+    }
+
     console.log("\n================ SYNC REPORT ================");
-    console.log(`New Emails Ingested (No AI Draft): ${emailsInserted}`);
-    console.log(`New Calendar Meetings Added:       ${meetingsInserted}`);
+    console.log(`New Emails Ingested (No AI Draft):   ${emailsInserted}`);
+    console.log(`New Calendar Meetings Added:         ${meetingsInserted}`);
+    console.log(`New Teams & Zoom Messages Ingested:  ${chatMessagesInserted}`);
     console.log(`Database updated successfully on Supabase (syncs with Render).`);
     console.log("=============================================\n");
   } finally {

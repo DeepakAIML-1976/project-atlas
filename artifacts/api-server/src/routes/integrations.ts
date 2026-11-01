@@ -438,11 +438,173 @@ router.get("/atlas/integrations/sync/status", async (_req, res): Promise<void> =
   res.json(status);
 });
 
-// POST trigger universal multi-workspace sync cycle immediately
-router.post("/atlas/integrations/sync/trigger", async (_req, res): Promise<void> => {
-  const { runTeamsSyncCycle } = await import("../lib/integrations/teamsSyncService.js");
-  const status = await runTeamsSyncCycle();
-  res.json({ success: true, status });
+// GET chat messages from MS Teams and Zoom
+router.get("/atlas/chat-drafts", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const platform = req.query.platform as string | undefined;
+  const status = req.query.status as string | undefined;
+
+  try {
+    const { db, atlasChatDraftsTable } = await import("@workspace/db");
+    const { eq, and, desc } = await import("drizzle-orm");
+
+    const conditions = [eq(atlasChatDraftsTable.workspaceId, ctx.workspaceId)];
+    if (platform && platform !== "all") {
+      conditions.push(eq(atlasChatDraftsTable.platform, platform));
+    }
+    if (status && status !== "all") {
+      conditions.push(eq(atlasChatDraftsTable.status, status));
+    }
+
+    const chatDrafts = await db
+      .select()
+      .from(atlasChatDraftsTable)
+      .where(and(...conditions))
+      .orderBy(desc(atlasChatDraftsTable.createdAt));
+
+    res.json({ chatDrafts });
+  } catch (err: any) {
+    logger.warn({ err: err?.message }, "Failed to fetch chat drafts");
+    res.json({ chatDrafts: [] });
+  }
+});
+
+// POST ingest a new chat message from MS Teams or Zoom
+router.post("/atlas/chat-drafts/ingest", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const { platform, chatId, senderName, senderEmail, incomingMessage } = req.body;
+  if (!chatId || !senderName || !incomingMessage) {
+    res.status(400).json({ error: "Missing required fields (chatId, senderName, incomingMessage)" });
+    return;
+  }
+
+  const { ingestCleanChatMessage } = await import("../lib/integrations/chatMonitoringService.js");
+  const result = await ingestCleanChatMessage({
+    workspaceId: ctx.workspaceId,
+    platform: platform === "zoom" ? "zoom" : "teams",
+    chatId: String(chatId),
+    senderName: String(senderName),
+    senderEmail: senderEmail ? String(senderEmail) : undefined,
+    incomingMessage: String(incomingMessage),
+  });
+
+  res.status(201).json(result);
+});
+
+// POST generate AI draft reply for a user-selected chat message
+router.post("/atlas/chat-drafts/:id/generate-draft", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const { id } = req.params;
+  const { generateDraftForChatMessage } = await import("../lib/integrations/chatMonitoringService.js");
+  const result = await generateDraftForChatMessage(ctx.workspaceId, id);
+
+  if (!result.success) {
+    res.status(400).json({ error: result.error });
+    return;
+  }
+
+  res.json(result);
+});
+
+// PATCH edit draft response text
+router.patch("/atlas/chat-drafts/:id", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const { id } = req.params;
+  const { twinDraftResponse, reasoning } = req.body;
+
+  const { db, atlasChatDraftsTable } = await import("@workspace/db");
+  const { eq, and } = await import("drizzle-orm");
+
+  const [updated] = await db
+    .update(atlasChatDraftsTable)
+    .set({
+      twinDraftResponse,
+      reasoning: reasoning !== undefined ? reasoning : undefined,
+    })
+    .where(
+      and(
+        eq(atlasChatDraftsTable.id, id),
+        eq(atlasChatDraftsTable.workspaceId, ctx.workspaceId),
+      ),
+    )
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Draft not found" });
+    return;
+  }
+
+  res.json(updated);
+});
+
+// POST approve draft response
+router.post("/atlas/chat-drafts/:id/approve", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const { id } = req.params;
+  const { db, atlasChatDraftsTable } = await import("@workspace/db");
+  const { eq, and } = await import("drizzle-orm");
+
+  const [updated] = await db
+    .update(atlasChatDraftsTable)
+    .set({
+      status: "approved",
+      authorizedAt: new Date(),
+    })
+    .where(
+      and(
+        eq(atlasChatDraftsTable.id, id),
+        eq(atlasChatDraftsTable.workspaceId, ctx.workspaceId),
+      ),
+    )
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Draft not found" });
+    return;
+  }
+
+  res.json({ success: true, record: updated });
+});
+
+// DELETE chat draft
+router.delete("/atlas/chat-drafts/:id", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const { id } = req.params;
+  const { db, atlasChatDraftsTable } = await import("@workspace/db");
+  const { eq, and } = await import("drizzle-orm");
+
+  await db
+    .delete(atlasChatDraftsTable)
+    .where(
+      and(
+        eq(atlasChatDraftsTable.id, id),
+        eq(atlasChatDraftsTable.workspaceId, ctx.workspaceId),
+      ),
+    );
+
+  res.json({ success: true, id });
+});
+
+// POST sync Teams & Zoom messages from workstation
+router.post("/atlas/integrations/chat/sync", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  if (!ctx) return;
+
+  const { syncTeamsAndZoomMessages } = await import("../lib/integrations/chatMonitoringService.js");
+  const report = await syncTeamsAndZoomMessages(ctx.workspaceId);
+  res.json(report);
 });
 
 export default router;

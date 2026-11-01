@@ -14,6 +14,7 @@ import { AuthorizationInbox } from '@/pages/authorization-inbox';
 import { KnowledgeUnits } from '@/pages/knowledge-units';
 import { LiveMeetings } from '@/pages/live-meetings';
 import { EmailInbox } from '@/pages/email-inbox';
+import { ChatInbox } from '@/pages/chat-inbox';
 import { DelegationRules } from '@/pages/delegation-rules';
 import { LoginPage } from '@/pages/login';
 
@@ -96,6 +97,7 @@ function Routes(){return <Routed><Switch>
   <Route path="/overview">{<Protected><Overview/></Protected>}</Route>
   <Route path="/authorization-inbox">{<Protected><AuthorizationInbox/></Protected>}</Route>
   <Route path="/email-inbox">{<Protected><EmailInbox/></Protected>}</Route>
+  <Route path="/chat-inbox">{<Protected><ChatInbox/></Protected>}</Route>
   <Route path="/live-meetings">{<Protected><LiveMeetings/></Protected>}</Route>
   <Route path="/knowledge-units">{<Protected><KnowledgeUnits/></Protected>}</Route>
   <Route path="/delegation-rules">{<Protected><DelegationRules/></Protected>}</Route>

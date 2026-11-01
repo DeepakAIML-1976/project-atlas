@@ -474,6 +474,7 @@ export const atlasChatDraftsTable = pgTable(
     workspaceId: text("workspace_id")
       .notNull()
       .references(() => atlasWorkspacesTable.id, { onDelete: "cascade" }),
+    platform: text("platform").notNull().default("teams"),
     chatId: text("chat_id").notNull(),
     messageId: text("message_id").notNull(),
     senderName: text("sender_name").notNull(),

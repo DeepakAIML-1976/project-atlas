@@ -1,13 +1,14 @@
 import type { ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { Link, useLocation } from 'wouter';
-import { Activity, ArrowUpRight, BookOpenText, Boxes, CalendarDays, ChevronRight, Compass, FileStack, Fingerprint, GitBranch, LayoutDashboard, LogOut, Mail, Scale, ShieldCheck, Sliders, Video, X } from 'lucide-react';
+import { Activity, ArrowUpRight, BookOpenText, Boxes, CalendarDays, ChevronRight, Compass, FileStack, Fingerprint, GitBranch, LayoutDashboard, LogOut, Mail, MessageSquare, Scale, ShieldCheck, Sliders, Video, X } from 'lucide-react';
 import { useClerk } from '@clerk/react';
 
 const links = [
   { href:'/overview', label:'Overview', icon:LayoutDashboard },
   { href:'/authorization-inbox', label:'Executive Inbox', icon:ShieldCheck },
   { href:'/email-inbox', label:'Email Ingest', icon:Mail },
+  { href:'/chat-inbox', label:'Teams & Zoom Chat', icon:MessageSquare },
   { href:'/live-meetings', label:'Live Bot', icon:Video },
   { href:'/knowledge-units', label:'Knowledge & Heuristics', icon:BookOpenText },
   { href:'/delegation-rules', label:'Delegation Rules', icon:Sliders },
