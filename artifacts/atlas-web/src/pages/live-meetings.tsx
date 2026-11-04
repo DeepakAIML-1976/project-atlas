@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Video, Plus, AlertTriangle, Sparkles, Send, CheckCircle2, PhoneOff, ShieldCheck, MessageSquare, Bot, UserCheck, RefreshCw, Link as LinkIcon, Trash2, Calendar, CalendarClock, ExternalLink, Play } from 'lucide-react';
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } from '@/components/atlas-ui';
+import { TopBarAppHealthPill } from '@/components/ClientAppHealthBanner';
 import { Link } from 'wouter';
 
 interface LiveMeeting {
@@ -319,7 +320,8 @@ export function LiveMeetings() {
         italic="always identified."
         description="Sync your desktop Outlook calendar (deepak.paranjape@kentplc.com). Review upcoming meetings for the week, select which sessions Deepak's AI Representative will attend, and review live transcripts."
         action={
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <TopBarAppHealthPill />
             <button
               className="btn btn-outline"
               disabled={syncOutlookCalendarMutation.isPending}

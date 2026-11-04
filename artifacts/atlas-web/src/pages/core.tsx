@@ -4,6 +4,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowRight, ArrowUpRight, Check, CircleHelp, FilePlus2, Fingerprint, LockKeyhole, Plus, ShieldCheck, Trash2, UploadCloud } from 'lucide-react';
 import { getGetAtlasOverviewQueryKey, getGetAtlasSessionQueryKey, getGetAtlasSourcesQueryKey, getGetAtlasSourceQueryKey, getGetMyTwinQueryKey, getGetStorageObjectQueryKey, useAnalyzeAtlasSource, useCreateAtlasSource, useCreateAtlasWorkspace, useDeleteAtlasSource, useGetAtlasOverview, useGetAtlasSource, useGetAtlasSources, useGetMyTwin, useGetStorageObject, useRequestUploadUrl, useUpdateMyTwinAutonomy, useUpdateMyTwinField, type AtlasSource, type ProfileSuggestion, type TwinFieldKey, type SourceKind } from '@workspace/api-client-react';
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, displayKey, formatDate, navCards } from '@/components/atlas-ui';
+import { TopBarAppHealthPill } from '@/components/ClientAppHealthBanner';
 
 function useRefresh(keys: readonly (readonly string[])[]) { const qc=useQueryClient(); return ()=>keys.forEach(key=>qc.invalidateQueries({queryKey:key})); }
 export function Onboarding() {
@@ -34,6 +35,23 @@ export function Overview() {
   const counts=[['Your twins',o.counts.twins],['Sources',o.counts.sources],['Meetings',o.counts.meetings],['Pending reviews',o.counts.pendingDecisions],['Open actions',o.counts.actions],['Knowledge links',o.counts.knowledgeLinks]];
   return <>
     <PageHead eyebrow="WORKSPACE / OVERVIEW" title="A clearer picture," italic="on your terms." description={`Welcome to ${o.workspace.name}. This is a space for evidence you choose to bring in, and decisions you choose to make.`}/>
+    <div className="card card-pad" style={{ marginBottom: 20, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 16, flexWrap: 'wrap', background: '#fdfcfb', border: '1.5px solid #e3ded8' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <div style={{ width: 42, height: 42, borderRadius: 8, background: '#dcfce7', display: 'grid', placeItems: 'center', color: '#16a34a' }}>
+          <Check size={22} strokeWidth={2.5} />
+        </div>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Desktop Applications & Task Manager Pipeline</h3>
+            <span className="badge green">Live Sync Companion Active</span>
+          </div>
+          <p style={{ margin: '4px 0 0', fontSize: 13, color: '#666' }}>
+            Workstation tasks verified: <strong>OUTLOOK.EXE</strong> (Email & Calendar) • <strong>ms-teams.exe</strong> (Chats) • <strong>Zoom.exe</strong> (Meetings)
+          </p>
+        </div>
+      </div>
+      <TopBarAppHealthPill />
+    </div>
     <div className="grid-two">
       <div className="card" style={{background:'#302b3f',color:'#f8f2e7',padding:'clamp(25px,4vw,44px)',minHeight:280,position:'relative',overflow:'hidden'}}>
         <div style={{position:'absolute',right:-35,top:-90,width:310,height:310,border:'1px solid #625a71',borderRadius:'50%',boxShadow:'0 0 0 37px #302b3f,0 0 0 38px #625a71,0 0 0 78px #302b3f,0 0 0 79px #625a71',opacity:.65}}/>

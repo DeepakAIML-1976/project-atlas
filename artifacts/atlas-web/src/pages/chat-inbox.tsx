@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MessageSquare, RefreshCw, Plus, Sparkles, CheckCircle2, Copy, Send, Trash2, Edit3, Bot, Video } from 'lucide-react';
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } from '@/components/atlas-ui';
+import { TopBarAppHealthPill } from '@/components/ClientAppHealthBanner';
 
 interface ChatDraft {
   id: string;
@@ -185,7 +186,8 @@ export function ChatInbox() {
         italic="selective AI replies."
         description="Monitor incoming messages across Microsoft Teams and Zoom. Ingested messages arrive cleanly—select which messages receive an AI-drafted reply grounded in Deepak's golden heuristics."
         action={
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <TopBarAppHealthPill />
             <button
               className="btn btn-outline"
               disabled={syncChatMutation.isPending}

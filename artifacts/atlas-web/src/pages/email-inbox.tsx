@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Mail, Plus, Sparkles, RefreshCw, ShieldCheck, ArrowRight, Lock, Eye, EyeOff, CheckSquare, Square, Send, Search } from 'lucide-react';
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } from '@/components/atlas-ui';
+import { TopBarAppHealthPill } from '@/components/ClientAppHealthBanner';
 import { Link } from 'wouter';
 import { getActiveOwnerEmail } from '@workspace/api-client-react';
 
@@ -268,7 +269,8 @@ export function EmailInbox() {
         italic="replies drafted for you."
         description="Your AI Digital Twin reads incoming technical inquiries from your live Outlook desktop app, applies your 35-year Piping SME heuristics & DeepSeek intelligence, pre-drafts rigorous responses, and routes them to your Executive Authorization Inbox for sign-off."
         action={
-          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+            <TopBarAppHealthPill />
             {pendingDrafts.length > 0 && (
               <button
                 className="btn btn-outline"
