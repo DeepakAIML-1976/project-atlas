@@ -28,15 +28,24 @@ function isDeepak(s) {
 
 function checkTasks() {
   if (process.platform !== "win32") return { ol: false, tm: false, zm: false };
+  let ol = false;
+  let tm = false;
+  let zm = false;
   try {
     const out = execSync("tasklist /FO CSV /NH", { encoding: "utf8", windowsHide: true }).toLowerCase();
-    const ol = out.includes("outlook.exe");
-    const tm = out.includes("ms-teams.exe") || out.includes("teams.exe");
-    const zm = out.includes("zoom.exe");
-    return { ol, tm, zm };
-  } catch {
-    return { ol: false, tm: false, zm: false };
+    ol = out.includes("outlook.exe");
+    tm = out.includes("ms-teams.exe") || out.includes("teams.exe");
+    zm = out.includes("zoom.exe");
+  } catch {}
+  if (!tm || !zm || !ol) {
+    try {
+      const psOut = execSync('powershell.exe -NoProfile -Command "Get-Process -Name OUTLOOK, ms-teams, teams, Zoom -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName"', { encoding: "utf8", windowsHide: true }).toLowerCase();
+      if (psOut.includes("outlook")) ol = true;
+      if (psOut.includes("teams")) tm = true;
+      if (psOut.includes("zoom")) zm = true;
+    } catch {}
   }
+  return { ol, tm, zm };
 }
 
 async function syncCycle() {

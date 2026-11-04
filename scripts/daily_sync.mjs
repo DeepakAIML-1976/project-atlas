@@ -17,10 +17,13 @@ function isOutlookRunning() {
   if (process.platform !== "win32") return false;
   try {
     const out = execSync('tasklist /FI "IMAGENAME eq OUTLOOK.EXE" /NH', { encoding: "utf8", windowsHide: true });
-    return out.toLowerCase().includes("outlook.exe");
-  } catch {
-    return false;
-  }
+    if (out.toLowerCase().includes("outlook.exe")) return true;
+  } catch {}
+  try {
+    const ps = execSync('powershell.exe -NoProfile -Command "Get-Process -Name OUTLOOK -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id"', { encoding: "utf8", windowsHide: true }).trim();
+    if (ps.length > 0) return true;
+  } catch {}
+  return false;
 }
 
 function promptUserToOpenOutlook() {
@@ -193,47 +196,42 @@ async function executeSync() {
   console.log("========================================================");
 
   // Check if Outlook is open
-  if (!isOutlookRunning()) {
-    promptUserToOpenOutlook();
-    // Wait up to 30 seconds to see if user opens Outlook
-    console.log("Waiting for user to open Outlook desktop application...");
-    for (let i = 0; i < 6; i++) {
-      await new Promise((r) => setTimeout(r, 5000));
-      if (isOutlookRunning()) {
-        console.log("Outlook is now open! Proceeding with sync...");
-        break;
-      }
+  const outlookOpen = isOutlookRunning();
+  let emails = [];
+  let sentEmails = [];
+  let meetings = [];
+
+  if (outlookOpen) {
+    console.log(`[STATUS] Outlook is RUNNING in Task Manager. Connecting to desktop Outlook (${TARGET_ACCOUNT})...`);
+    try {
+      const rawData = await new Promise((resolve, reject) => {
+        const child = spawn("powershell", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", PS_SYNC_SCRIPT], {
+          windowsHide: true,
+        });
+        let stdout = "";
+        let stderr = "";
+        child.stdout.on("data", (d) => (stdout += d.toString("utf8")));
+        child.stderr.on("data", (d) => (stderr += d.toString("utf8")));
+        child.on("close", (code) => {
+          if (code !== 0) return reject(new Error(`PowerShell error: ${stderr}`));
+          try {
+            resolve(JSON.parse(stdout.trim() || '{"emails":[],"meetings":[],"sentEmails":[]}'));
+          } catch (err) {
+            reject(err);
+          }
+        });
+      });
+
+      emails = rawData.emails || [];
+      sentEmails = rawData.sentEmails || [];
+      meetings = rawData.meetings || [];
+      console.log(`Scanned ${emails.length} incoming email(s), ${sentEmails.length} sent email(s), and ${meetings.length} active calendar meeting(s).`);
+    } catch (err) {
+      console.warn("Could not extract from Outlook:", err.message);
     }
+  } else {
+    console.log("[STATUS] Outlook is NOT running in Task Manager. Skipping Outlook ingestion; proceeding with Teams & Zoom sync.");
   }
-
-  if (!isOutlookRunning()) {
-    console.log("Outlook was not opened. Daily sync skipped until Outlook is launched.");
-    return;
-  }
-
-  console.log(`Connecting to desktop Outlook application (${TARGET_ACCOUNT})...`);
-  const rawData = await new Promise((resolve, reject) => {
-    const child = spawn("powershell", ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", PS_SYNC_SCRIPT], {
-      windowsHide: true,
-    });
-    let stdout = "";
-    let stderr = "";
-    child.stdout.on("data", (d) => (stdout += d.toString("utf8")));
-    child.stderr.on("data", (d) => (stderr += d.toString("utf8")));
-    child.on("close", (code) => {
-      if (code !== 0) return reject(new Error(`PowerShell error: ${stderr}`));
-      try {
-        resolve(JSON.parse(stdout.trim() || '{"emails":[],"meetings":[]}'));
-      } catch (err) {
-        reject(err);
-      }
-    });
-  });
-
-  const emails = rawData.emails || [];
-  const sentEmails = rawData.sentEmails || [];
-  const meetings = rawData.meetings || [];
-  console.log(`Scanned ${emails.length} incoming email(s), ${sentEmails.length} sent email(s), and ${meetings.length} active calendar meeting(s).`);
 
   const pool = new Pool({
     host: "aws-0-ap-northeast-1.pooler.supabase.com",
@@ -248,14 +246,24 @@ async function executeSync() {
   const client = await pool.connect();
   try {
     // 0. RECORD WORKSTATION APP HEALTH (Outlook, Teams, Zoom)
-    let ol = false;
+    let ol = outlookOpen;
     let tm = false;
     let zm = false;
     try {
       const taskOut = execSync('tasklist /FO CSV /NH', { encoding: 'utf8', windowsHide: true }).toLowerCase();
-      ol = taskOut.includes('outlook.exe');
+      ol = ol || taskOut.includes('outlook.exe');
       tm = taskOut.includes('teams.exe') || taskOut.includes('ms-teams.exe');
       zm = taskOut.includes('zoom.exe');
+    } catch {}
+    if (!tm || !zm) {
+      try {
+        const psOut = execSync('powershell.exe -NoProfile -Command "Get-Process -Name OUTLOOK, ms-teams, teams, Zoom -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName"', { encoding: 'utf8', windowsHide: true }).toLowerCase();
+        if (psOut.includes('outlook')) ol = true;
+        if (psOut.includes('teams')) tm = true;
+        if (psOut.includes('zoom')) zm = true;
+      } catch {}
+    }
+    try {
       const healthId = "health_" + WORKSPACE_ID;
       await client.query(`
         INSERT INTO atlas_app_health (id, workspace_id, device_name, outlook_running, teams_running, zoom_running, account_email, last_heartbeat)
@@ -266,6 +274,7 @@ async function executeSync() {
           zoom_running = EXCLUDED.zoom_running,
           last_heartbeat = NOW()
       `, [healthId, WORKSPACE_ID, 'Windows Workstation', ol, tm, zm, TARGET_ACCOUNT]);
+      console.log(`[APP HEALTH] Heartbeat updated -> Outlook: ${ol ? 'RUNNING' : 'CLOSED'}, Teams: ${tm ? 'RUNNING' : 'CLOSED'}, Zoom: ${zm ? 'RUNNING' : 'CLOSED'}`);
     } catch (e) {
       console.warn("Could not record app health:", e.message);
     }
@@ -313,7 +322,6 @@ async function executeSync() {
     );
 
     let sentEmailsInserted = 0;
-    const sentEmails = rawData.sentEmails || [];
     for (const mail of sentEmails) {
       const recipient = mail.to || "Unknown Recipient";
       const subject = mail.subject || "No Subject";
