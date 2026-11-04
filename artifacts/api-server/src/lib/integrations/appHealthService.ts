@@ -1,4 +1,4 @@
-﻿import { execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { db } from "@workspace/db";
 import { atlasAppHealthTable } from "@workspace/db/schema";
 import { eq } from "drizzle-orm";
@@ -33,16 +33,29 @@ export function checkLocalDesktopProcesses(): { outlookRunning: boolean; teamsRu
   if (process.platform !== "win32") {
     return { outlookRunning: false, teamsRunning: false, zoomRunning: false };
   }
+  let outlookRunning = false;
+  let teamsRunning = false;
+  let zoomRunning = false;
+
   try {
     const out = execSync("tasklist /FO CSV /NH", { encoding: "utf8", windowsHide: true }).toLowerCase();
-    const outlookRunning = out.includes("outlook.exe");
-    const teamsRunning = out.includes("teams.exe") || out.includes("ms-teams.exe");
-    const zoomRunning = out.includes("zoom.exe");
-    return { outlookRunning, teamsRunning, zoomRunning };
+    outlookRunning = out.includes("outlook.exe");
+    teamsRunning = out.includes("teams.exe") || out.includes("ms-teams.exe");
+    zoomRunning = out.includes("zoom.exe");
   } catch (err: any) {
-    logger.warn({ err: err?.message }, "Failed to execute tasklist for app health check");
-    return { outlookRunning: false, teamsRunning: false, zoomRunning: false };
+    logger.warn({ err: err?.message }, "Tasklist failed, trying Get-Process fallback");
   }
+
+  if (!outlookRunning || !teamsRunning || !zoomRunning) {
+    try {
+      const psOut = execSync('powershell.exe -NoProfile -Command "Get-Process -Name OUTLOOK, ms-teams, teams, Zoom -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName"', { encoding: "utf8", windowsHide: true }).toLowerCase();
+      if (psOut.includes("outlook")) outlookRunning = true;
+      if (psOut.includes("teams")) teamsRunning = true;
+      if (psOut.includes("zoom")) zoomRunning = true;
+    } catch {}
+  }
+
+  return { outlookRunning, teamsRunning, zoomRunning };
 }
 
 export async function getClientAppHealth(workspaceId: string): Promise<ClientHealthReport> {
@@ -105,8 +118,8 @@ export async function getClientAppHealth(workspaceId: string): Promise<ClientHea
         lastChecked = record.lastHeartbeat ? new Date(record.lastHeartbeat) : new Date();
         const ageMinutes = (Date.now() - lastChecked.getTime()) / (1000 * 60);
 
-        // If reported within 60 minutes, use the status
-        if (ageMinutes < 60) {
+        // If reported within 24 hours (active workstation day), use the status
+        if (ageMinutes < 1440) {
           outlookRunning = record.outlookRunning;
           teamsRunning = record.teamsRunning;
           zoomRunning = record.zoomRunning;

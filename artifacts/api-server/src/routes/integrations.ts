@@ -384,6 +384,15 @@ router.get("/atlas/integrations/client-health", async (req, res): Promise<void> 
   res.json(report);
 });
 
+// POST trigger on-demand re-check of client applications and sync health
+router.post("/atlas/integrations/client-health/recheck", async (req, res): Promise<void> => {
+  const ctx = await workspaceContext(req, res);
+  const workspaceId = ctx?.workspaceId || "1a39970a-abf0-48c3-8b89-08b669e80bbe";
+  const { getClientAppHealth } = await import("../lib/integrations/appHealthService.js");
+  const report = await getClientAppHealth(workspaceId);
+  res.json({ success: true, report });
+});
+
 // GET Outlook Desktop status (is Outlook.exe running on workstation)
 router.get("/atlas/integrations/outlook/status", async (req, res): Promise<void> => {
   const { isOutlookProcessRunning } = await import("../lib/integrations/outlookCalendar.js");

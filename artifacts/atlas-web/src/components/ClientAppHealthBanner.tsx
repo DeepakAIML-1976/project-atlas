@@ -30,6 +30,7 @@ interface ClientHealthReport {
 export function ClientAppHealthBanner() {
   const [isDismissed, setIsDismissed] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
+  const [isRechecking, setIsRechecking] = useState(false);
 
   const { data, isLoading, refetch, isFetching } = useQuery<ClientHealthReport>({
     queryKey: ['/api/atlas/integrations/client-health'],
@@ -40,6 +41,15 @@ export function ClientAppHealthBanner() {
     },
     refetchInterval: 10000,
   });
+
+  const handleRecheck = async () => {
+    setIsRechecking(true);
+    try {
+      await fetch('/api/atlas/integrations/client-health/recheck', { method: 'POST' });
+    } catch {}
+    await refetch();
+    setIsRechecking(false);
+  };
 
   if (isLoading || !data) return null;
 
@@ -190,11 +200,11 @@ export function ClientAppHealthBanner() {
             type="button"
             className="btn btn-outline"
             style={{ fontSize: 11, padding: '4px 8px', background: '#fff' }}
-            disabled={isFetching}
-            onClick={() => refetch()}
-            title="Re-check running applications"
+            disabled={isFetching || isRechecking}
+            onClick={handleRecheck}
+            title="Re-check running applications in Task Manager"
           >
-            <RefreshCw size={12} className={isFetching ? 'spin' : ''} /> Re-check Apps
+            <RefreshCw size={12} className={isFetching || isRechecking ? 'spin' : ''} /> {isRechecking ? 'Checking...' : 'Re-check Apps'}
           </button>
 
           <button
