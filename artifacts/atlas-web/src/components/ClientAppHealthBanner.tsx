@@ -53,9 +53,98 @@ export function ClientAppHealthBanner() {
 
   if (isLoading || !data) return null;
 
-  // If everything is running perfectly and no warning needed
+  // If everything is running perfectly in Task Manager
   if (!data.requiresWarning) {
-    return null;
+    if (isDismissed) {
+      return (
+        <div style={{ background: '#f0fdf4', borderBottom: '1px solid #bbf7d0', padding: '6px 20px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: '#166534' }}>
+            <CheckCircle2 size={13} color="#16a34a" />
+            <span>All desktop apps ready (Outlook, Teams, Zoom active in system tasks)</span>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              style={{ fontSize: 11, padding: '2px 8px', background: '#fff', borderColor: '#86efac', color: '#166534' }}
+              disabled={isFetching || isRechecking}
+              onClick={handleRecheck}
+              title="Re-check running applications in Task Manager"
+            >
+              <RefreshCw size={11} className={isFetching || isRechecking ? 'spin' : ''} /> {isRechecking ? 'Checking...' : 'Re-check Apps'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-quiet"
+              style={{ fontSize: 11, padding: '2px 6px' }}
+              onClick={() => setIsDismissed(false)}
+            >
+              Show Details
+            </button>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div
+        style={{
+          background: '#f0fdf4',
+          borderBottom: '2px solid #86efac',
+          padding: '10px 20px',
+          fontSize: 13,
+          color: '#1f2937',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.03)',
+        }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <CheckCircle2 size={18} color="#16a34a" style={{ flexShrink: 0 }} />
+            <div>
+              <span style={{ fontWeight: 600, color: '#166534', marginRight: 8 }}>
+                Desktop Application Readiness
+              </span>
+              <span className="badge" style={{ background: '#dcfce7', color: '#15803d', borderColor: '#86efac', fontWeight: 600 }}>
+                ● All Ingestions Active
+              </span>
+            </div>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginLeft: 8 }}>
+              <span style={{ fontSize: 12, background: '#fff', padding: '2px 8px', borderRadius: 4, border: '1px solid #bbf7d0', color: '#166534' }}>
+                ✓ Outlook: Running
+              </span>
+              <span style={{ fontSize: 12, background: '#fff', padding: '2px 8px', borderRadius: 4, border: '1px solid #bbf7d0', color: '#166534' }}>
+                ✓ Teams: Running
+              </span>
+              <span style={{ fontSize: 12, background: '#fff', padding: '2px 8px', borderRadius: 4, border: '1px solid #bbf7d0', color: '#166534' }}>
+                ✓ Zoom: Running
+              </span>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <button
+              type="button"
+              className="btn btn-outline"
+              style={{ fontSize: 11, padding: '4px 10px', background: '#fff', borderColor: '#86efac', color: '#166534', fontWeight: 600 }}
+              disabled={isFetching || isRechecking}
+              onClick={handleRecheck}
+              title="Re-check running applications in Task Manager"
+            >
+              <RefreshCw size={12} className={isFetching || isRechecking ? 'spin' : ''} /> {isRechecking ? 'Checking...' : 'Re-check Apps'}
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              style={{ width: 22, height: 22 }}
+              onClick={() => setIsDismissed(true)}
+              title="Minimize banner"
+            >
+              <X size={13} />
+            </button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (isDismissed) {
@@ -228,6 +317,77 @@ export function ClientAppHealthBanner() {
           </button>
         </div>
       </div>
+    </div>
+  );
+}
+
+export function TopBarAppHealthPill() {
+  const [isRechecking, setIsRechecking] = useState(false);
+
+  const { data, refetch, isFetching } = useQuery<ClientHealthReport>({
+    queryKey: ['/api/atlas/integrations/client-health'],
+    queryFn: async () => {
+      const res = await fetch('/api/atlas/integrations/client-health');
+      if (!res.ok) throw new Error('Failed to fetch client app health');
+      return res.json();
+    },
+    refetchInterval: 10000,
+  });
+
+  const handleRecheck = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    setIsRechecking(true);
+    try {
+      await fetch('/api/atlas/integrations/client-health/recheck', { method: 'POST' });
+    } catch {}
+    await refetch();
+    setIsRechecking(false);
+  };
+
+  if (!data) return null;
+
+  const allReady = data.allReady;
+  const isOutlookDown = !data.apps.outlook.running;
+
+  return (
+    <div
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '3px 10px',
+        borderRadius: 9999,
+        background: allReady ? '#dcfce7' : isOutlookDown ? '#fee2e2' : '#fef3c7',
+        border: `1px solid ${allReady ? '#86efac' : isOutlookDown ? '#fca5a5' : '#fde68a'}`,
+        color: allReady ? '#15803d' : isOutlookDown ? '#991b1b' : '#92400e',
+        fontSize: 11,
+        fontWeight: 600,
+      }}
+      title={`Outlook: ${data.apps.outlook.running ? 'Running' : 'Closed'} | Teams: ${data.apps.teams.running ? 'Running' : 'Closed'} | Zoom: ${data.apps.zoom.running ? 'Running' : 'Closed'}`}
+    >
+      {allReady ? (
+        <CheckCircle2 size={12} color="#16a34a" />
+      ) : (
+        <AlertTriangle size={12} color={isOutlookDown ? '#dc2626' : '#d97706'} />
+      )}
+      <span>{allReady ? 'Apps Ready' : isOutlookDown ? 'Outlook Closed' : 'Partial Apps'}</span>
+      <button
+        type="button"
+        onClick={handleRecheck}
+        disabled={isFetching || isRechecking}
+        title="Re-check running applications in Task Manager"
+        style={{
+          background: 'transparent',
+          border: 'none',
+          padding: '0 2px',
+          cursor: 'pointer',
+          color: 'inherit',
+          display: 'flex',
+          alignItems: 'center',
+        }}
+      >
+        <RefreshCw size={11} className={isFetching || isRechecking ? 'spin' : ''} />
+      </button>
     </div>
   );
 }

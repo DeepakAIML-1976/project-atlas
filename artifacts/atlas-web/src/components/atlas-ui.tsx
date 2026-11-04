@@ -21,7 +21,7 @@ const links = [
 ];
 
 import { ProfileSwitcher } from '@/components/profile-switcher';
-import { ClientAppHealthBanner } from '@/components/ClientAppHealthBanner';
+import { ClientAppHealthBanner, TopBarAppHealthPill } from '@/components/ClientAppHealthBanner';
 
 export function Brand({ light = false }: { light?:boolean }) {
   return <Link href="/" className="brand" data-testid="link-atlas-home"><span className="brand-mark">a</span><span className="brand-text" style={{color:light?'#292538':undefined}}>atlas<span style={{color:'#c97b59'}}>.</span></span></Link>;
@@ -60,7 +60,8 @@ export function Shell({ children, workspace }: { children:ReactNode; workspace?:
     <div className="shell-main">
       <header className="topbar">
         <div className="crumb"><span>Atlas</span><ChevronRight size={13}/><strong>{current}</strong></div>
-        <div style={{display:'flex',alignItems:'center',gap:16}}>
+        <div style={{display:'flex',alignItems:'center',gap:12}}>
+          <TopBarAppHealthPill />
           <div className="badge green"><ShieldCheck size={11}/> Human governed</div>
           <ProfileSwitcher variant="topbar"/>
         </div>
