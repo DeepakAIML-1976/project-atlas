@@ -20,6 +20,18 @@ const pool = new Pool({
   connectionTimeoutMillis: 15000,
 });
 
+pool.on("error", (err) => {
+  console.warn("PostgreSQL Pool idle client notification (auto-reconnecting):", err?.message || err);
+});
+
+process.on("uncaughtException", (err) => {
+  console.warn("Companion unhandled exception (resuming):", err?.message || err);
+});
+
+process.on("unhandledRejection", (reason) => {
+  console.warn("Companion unhandled rejection (resuming):", reason);
+});
+
 function isDeepak(s) {
   if (!s) return false;
   const l = s.toLowerCase();
