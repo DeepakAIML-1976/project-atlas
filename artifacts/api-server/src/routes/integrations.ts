@@ -377,8 +377,7 @@ router.post("/atlas/integrations/outlook/webhook", async (req, res): Promise<voi
 
 // GET real-time health and readiness of Outlook, Teams, and Zoom
 router.get("/atlas/integrations/client-health", async (req, res): Promise<void> => {
-  const ctx = await workspaceContext(req, res);
-  const workspaceId = ctx?.workspaceId || "1a39970a-abf0-48c3-8b89-08b669e80bbe";
+  const workspaceId = "1a39970a-abf0-48c3-8b89-08b669e80bbe";
   const { getClientAppHealth } = await import("../lib/integrations/appHealthService.js");
   const report = await getClientAppHealth(workspaceId);
   res.json(report);
@@ -386,8 +385,7 @@ router.get("/atlas/integrations/client-health", async (req, res): Promise<void> 
 
 // POST trigger on-demand re-check of client applications and sync health
 router.post("/atlas/integrations/client-health/recheck", async (req, res): Promise<void> => {
-  const ctx = await workspaceContext(req, res);
-  const workspaceId = ctx?.workspaceId || "1a39970a-abf0-48c3-8b89-08b669e80bbe";
+  const workspaceId = "1a39970a-abf0-48c3-8b89-08b669e80bbe";
   const { getClientAppHealth } = await import("../lib/integrations/appHealthService.js");
   const report = await getClientAppHealth(workspaceId);
   res.json({ success: true, report });

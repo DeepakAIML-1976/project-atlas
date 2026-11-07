@@ -4,6 +4,7 @@ import { Video, Plus, AlertTriangle, Sparkles, Send, CheckCircle2, PhoneOff, Shi
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } from '@/components/atlas-ui';
 import { TopBarAppHealthPill } from '@/components/ClientAppHealthBanner';
 import { Link } from 'wouter';
+import { apiFetch } from '@/lib/api-fetch';
 
 interface LiveMeeting {
   id: string;
@@ -77,18 +78,14 @@ export function LiveMeetings() {
   const meetingsQuery = useQuery<{ liveMeetings: LiveMeeting[] }>({
     queryKey: ['/api/atlas/live-meetings'],
     queryFn: async () => {
-      const res = await fetch('/api/atlas/live-meetings');
-      if (!res.ok) throw new Error('Failed to fetch live meetings');
-      return res.json();
+      return apiFetch<{ liveMeetings: LiveMeeting[] }>('/api/atlas/live-meetings');
     },
   });
 
   const accountsQuery = useQuery<{ accounts: LinkedAccount[] }>({
     queryKey: ['/api/atlas/integrations/accounts'],
     queryFn: async () => {
-      const res = await fetch('/api/atlas/integrations/accounts');
-      if (!res.ok) throw new Error('Failed to fetch linked accounts');
-      return res.json();
+      return apiFetch<{ accounts: LinkedAccount[] }>('/api/atlas/integrations/accounts');
     },
   });
 
@@ -96,9 +93,7 @@ export function LiveMeetings() {
     queryKey: ['/api/atlas/live-meetings', selectedMeetingId],
     queryFn: async () => {
       if (!selectedMeetingId) throw new Error('No meeting selected');
-      const res = await fetch(`/api/atlas/live-meetings/${selectedMeetingId}`);
-      if (!res.ok) throw new Error('Failed to fetch meeting detail');
-      return res.json();
+      return apiFetch<LiveMeetingDetail>(`/api/atlas/live-meetings/${selectedMeetingId}`);
     },
     enabled: !!selectedMeetingId,
   });
@@ -114,23 +109,18 @@ export function LiveMeetings() {
   }>({
     queryKey: ['/api/atlas/integrations/outlook/status'],
     queryFn: async () => {
-      const res = await fetch('/api/atlas/integrations/outlook/status');
-      if (!res.ok) throw new Error('Failed to fetch Outlook status');
-      return res.json();
+      return apiFetch('/api/atlas/integrations/outlook/status');
     },
     refetchInterval: 8000,
   });
 
   const syncOutlookCalendarMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/atlas/integrations/outlook/calendar/sync', {
+      return apiFetch<any>('/api/atlas/integrations/outlook/calendar/sync', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ daysAhead: 14 }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to sync Outlook calendar');
-      return data;
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
@@ -141,15 +131,28 @@ export function LiveMeetings() {
     },
   });
 
+  // Direct Teams meeting sync without opening modal; only asks for more info if it errors
+  const syncTeamsMeetingsMutation = useMutation({
+    mutationFn: async () => {
+      return apiFetch<any>('/api/atlas/integrations/teams/sync', { method: 'POST' });
+    },
+    onSuccess: (data) => {
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
+      alert(`MS Teams Meetings Sync Complete!\n\nDirectly synced with authenticated corporate credentials.`);
+    },
+    onError: (err: any) => {
+      // ONLY if direct sync requires more setup or fails, ask for more info by opening modal!
+      setIsLinkingAccount(true);
+    },
+  });
+
   const toggleBotAssignmentMutation = useMutation({
     mutationFn: async ({ meetingId, newStatus }: { meetingId: string; newStatus: 'scheduled' | 'idle' }) => {
-      const res = await fetch(`/api/atlas/live-meetings/${meetingId}/bot-assignment`, {
+      return apiFetch(`/api/atlas/live-meetings/${meetingId}/bot-assignment`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ botStatus: newStatus }),
       });
-      if (!res.ok) throw new Error('Failed to update bot assignment');
-      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
@@ -159,29 +162,26 @@ export function LiveMeetings() {
 
   const syncAllMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/atlas/integrations/accounts/sync-all', { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to sync accounts');
-      return res.json();
+      return apiFetch<any>('/api/atlas/integrations/accounts/sync-all', { method: 'POST' });
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/integrations/accounts'] });
       alert(`Calendar Sync Complete!\n\nProcessed ${data.totalAccounts || 0} linked MS Teams & Outlook account(s).`);
     },
+    onError: (err: any) => {
+      // ONLY ask for more info if it does not ingest correctly
+      setIsLinkingAccount(true);
+    },
   });
 
   const linkAccountMutation = useMutation({
     mutationFn: async (payload: { accountType: string; accountEmail: string; displayName?: string; accessToken?: string; tenantId?: string; clientId?: string; clientSecret?: string }) => {
-      const res = await fetch('/api/atlas/integrations/accounts', {
+      return apiFetch('/api/atlas/integrations/accounts', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) {
-        const errJson = await res.json().catch(() => ({}));
-        throw new Error(errJson.error || 'Failed to link account');
-      }
-      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/integrations/accounts'] });
@@ -194,9 +194,7 @@ export function LiveMeetings() {
 
   const unlinkAccountMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/atlas/integrations/accounts/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to unlink account');
-      return res.json();
+      return apiFetch(`/api/atlas/integrations/accounts/${id}`, { method: 'DELETE' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/integrations/accounts'] });
@@ -205,13 +203,11 @@ export function LiveMeetings() {
 
   const deployMutation = useMutation({
     mutationFn: async (payload: { meetingTitle: string; platform: string; meetingUrl?: string; botDisplayName: string }) => {
-      const res = await fetch('/api/atlas/live-meetings', {
+      return apiFetch('/api/atlas/live-meetings', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error('Failed to deploy meeting bot');
-      return res.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
@@ -226,13 +222,11 @@ export function LiveMeetings() {
   const transcriptMutation = useMutation({
     mutationFn: async (payload: { speakerName: string; text: string }) => {
       if (!selectedMeetingId) return;
-      const res = await fetch(`/api/atlas/live-meetings/${selectedMeetingId}/transcript`, {
+      return apiFetch(`/api/atlas/live-meetings/${selectedMeetingId}/transcript`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error('Failed to ingest transcript');
-      return res.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings', selectedMeetingId] });
@@ -247,13 +241,11 @@ export function LiveMeetings() {
   const statusMutation = useMutation({
     mutationFn: async (botStatus: 'in_call' | 'left' | 'errored') => {
       if (!selectedMeetingId) return;
-      const res = await fetch(`/api/atlas/live-meetings/${selectedMeetingId}/status`, {
+      return apiFetch(`/api/atlas/live-meetings/${selectedMeetingId}/status`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ botStatus }),
       });
-      if (!res.ok) throw new Error('Failed to update status');
-      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/live-meetings'] });
@@ -327,6 +319,7 @@ export function LiveMeetings() {
               disabled={syncOutlookCalendarMutation.isPending}
               onClick={() => syncOutlookCalendarMutation.mutate()}
               style={{ fontWeight: 600, borderColor: '#c65131', color: '#c65131' }}
+              title="Directly sync Outlook calendar without extra prompts"
             >
               <CalendarClock size={15} className={syncOutlookCalendarMutation.isPending ? 'spin' : ''} />
               {syncOutlookCalendarMutation.isPending ? 'Syncing Outlook...' : 'Sync Outlook Calendar'}
@@ -334,8 +327,20 @@ export function LiveMeetings() {
 
             <button
               className="btn btn-outline"
+              disabled={syncTeamsMeetingsMutation.isPending}
+              onClick={() => syncTeamsMeetingsMutation.mutate()}
+              style={{ fontWeight: 600, borderColor: '#2563eb', color: '#2563eb' }}
+              title="Directly sync MS Teams meetings using your login credentials"
+            >
+              <RefreshCw size={15} className={syncTeamsMeetingsMutation.isPending ? 'spin' : ''} />
+              {syncTeamsMeetingsMutation.isPending ? 'Syncing Teams...' : 'Sync Teams Meetings'}
+            </button>
+
+            <button
+              className="btn btn-outline"
               disabled={syncAllMutation.isPending}
               onClick={() => syncAllMutation.mutate()}
+              title="Directly sync all connected accounts without extra prompts"
             >
               <RefreshCw size={15} className={syncAllMutation.isPending ? 'spin' : ''} /> Sync Linked Accounts
             </button>

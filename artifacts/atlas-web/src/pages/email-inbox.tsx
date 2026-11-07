@@ -5,6 +5,7 @@ import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } f
 import { TopBarAppHealthPill } from '@/components/ClientAppHealthBanner';
 import { Link } from 'wouter';
 import { getActiveOwnerEmail } from '@workspace/api-client-react';
+import { apiFetch } from '@/lib/api-fetch';
 
 interface EmailDraft {
   id: string;
@@ -90,49 +91,71 @@ export function EmailInbox() {
   const [subject, setSubject] = useState('Piping Spec Clarification: Flange Rating for Separation Train');
   const [incomingBody, setIncomingBody] = useState('Hi Deepak,\n\nCould you please clarify the required ASME flange pressure rating and material grade for the 8-inch wet sour gas line downstream of the high pressure separator?\n\nThanks,\nJohn Doe');
 
+  // Direct Outlook Sync without invoking modal (only asks for info if it does not ingest correctly)
+  const handleDirectOutlookSync = async () => {
+    const activeEmail = (typeof window !== 'undefined' ? localStorage.getItem('atlas_active_owner_email') : null) || activeOwner || 'deepak.paranjape@kentplc.com';
+    setIsSyncing(true);
+    try {
+      const data = await apiFetch<any>('/api/atlas/integrations/outlook/sync', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          targetEmail: activeEmail.trim().toLowerCase(),
+          email: activeEmail.trim().toLowerCase(),
+          count: 50,
+          sinceDate: authSinceDate || '2026-10-18T00:00:00',
+          generateDraft: autoDraftOnSync,
+        }),
+      });
+
+      if (!data || data.success === false) {
+        throw new Error(data?.error || 'Direct sync failed.');
+      }
+
+      const scanned = data.scanned ?? data.count ?? 0;
+      const ingested = data.ingested ?? (data.count !== undefined ? data.count : 0);
+      const drafted = data.drafted ?? 0;
+      alert(`Outlook Ingestion Complete!\n\nDirectly synced with authenticated credentials for ${activeEmail}.\nScanned: ${scanned} email(s) | Ingested: ${ingested}${drafted > 0 ? ` | Generated ${drafted} draft(s)` : ''}.`);
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/sent-emails'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/atlas/authorization-inbox'] });
+    } catch (err: any) {
+      // ONLY ask for more info if it does not ingest correctly!
+      setAuthEmail(activeEmail);
+      setIsAuthModalOpen(true);
+    } finally {
+      setIsSyncing(false);
+    }
+  };
+
   const emailsQuery = useQuery<EmailDraftsData>({
     queryKey: ['/api/atlas/email-drafts', activeOwner],
     queryFn: async () => {
-      const res = await fetch('/api/atlas/email-drafts', {
-        headers: { 'X-Owner-Email': activeOwner },
-      });
-      if (!res.ok) throw new Error('Failed to fetch email drafts');
-      return res.json();
+      return apiFetch<EmailDraftsData>('/api/atlas/email-drafts');
     },
   });
 
   const sentEmailsQuery = useQuery<SentEmailsData>({
     queryKey: ['/api/atlas/sent-emails', activeOwner],
     queryFn: async () => {
-      const res = await fetch('/api/atlas/sent-emails', {
-        headers: { 'X-Owner-Email': activeOwner },
-      });
-      if (!res.ok) throw new Error('Failed to fetch sent emails');
-      return res.json();
+      return apiFetch<SentEmailsData>('/api/atlas/sent-emails');
     },
   });
 
   const llmQuery = useQuery<LLMStatusData>({
     queryKey: ['/api/atlas/llm/status'],
     queryFn: async () => {
-      const res = await fetch('/api/atlas/llm/status');
-      if (!res.ok) throw new Error('Failed to fetch LLM status');
-      return res.json();
+      return apiFetch<LLMStatusData>('/api/atlas/llm/status');
     },
   });
 
   const ingestMutation = useMutation({
     mutationFn: async (payload: { sender: string; subject: string; incomingBody: string; generateDraft: boolean }) => {
-      const res = await fetch('/api/atlas/email-drafts/ingest', {
+      return apiFetch<any>('/api/atlas/email-drafts/ingest', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Owner-Email': activeOwner,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error('Failed to ingest email');
-      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
@@ -143,12 +166,9 @@ export function EmailInbox() {
 
   const redraftAllMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/atlas/email-drafts/redraft-all', {
+      return apiFetch<any>('/api/atlas/email-drafts/redraft-all', {
         method: 'POST',
-        headers: { 'X-Owner-Email': activeOwner },
       });
-      if (!res.ok) throw new Error('Failed to redraft pending emails');
-      return res.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
@@ -163,12 +183,9 @@ export function EmailInbox() {
   const redraftOneMutation = useMutation({
     mutationFn: async (id: string) => {
       setRedraftingId(id);
-      const res = await fetch(`/api/atlas/email-drafts/${id}/redraft`, {
+      return apiFetch<any>(`/api/atlas/email-drafts/${id}/redraft`, {
         method: 'POST',
-        headers: { 'X-Owner-Email': activeOwner },
       });
-      if (!res.ok) throw new Error('Failed to generate draft');
-      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
@@ -184,16 +201,11 @@ export function EmailInbox() {
 
   const generateBatchMutation = useMutation({
     mutationFn: async (ids: string[]) => {
-      const res = await fetch('/api/atlas/email-drafts/generate-batch', {
+      return apiFetch<any>('/api/atlas/email-drafts/generate-batch', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Owner-Email': activeOwner,
-        },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids }),
       });
-      if (!res.ok) throw new Error('Failed to generate drafts for selected emails');
-      return res.json();
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/email-drafts'] });
@@ -284,14 +296,10 @@ export function EmailInbox() {
             <button
               className="btn btn-outline"
               disabled={isSyncing}
-              onClick={() => {
-                const activeEmail = (typeof window !== 'undefined' ? localStorage.getItem('atlas_active_owner_email') : null) || activeOwner || 'deepak.paranjape@kentplc.com';
-                setAuthEmail(activeEmail);
-                setIsAuthModalOpen(true);
-              }}
-              title="Authorize and ingest corporate mailbox emails for this workspace"
+              onClick={handleDirectOutlookSync}
+              title="Directly ingest incoming emails using available credentials for this login without extra prompts"
             >
-              <Mail size={15} /> {isSyncing ? 'Syncing Inbox…' : 'Sync Live Outlook Inbox'}
+              <Mail size={15} className={isSyncing ? 'spin' : ''} /> {isSyncing ? 'Syncing Outlook…' : 'Sync Live Outlook Inbox'}
             </button>
             <button className="btn btn-primary" onClick={() => setIsIngesting(true)}>
               <Plus size={15} /> Ingest Technical Query

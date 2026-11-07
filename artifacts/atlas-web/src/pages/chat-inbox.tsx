@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { MessageSquare, RefreshCw, Plus, Sparkles, CheckCircle2, Copy, Send, Trash2, Edit3, Bot, Video } from 'lucide-react';
 import { Empty, ErrorState, GoverningNote, Load, Modal, PageHead, formatDate } from '@/components/atlas-ui';
 import { TopBarAppHealthPill } from '@/components/ClientAppHealthBanner';
+import { apiFetch } from '@/lib/api-fetch';
 
 interface ChatDraft {
   id: string;
@@ -42,18 +43,14 @@ export function ChatInbox() {
       const params = new URLSearchParams();
       if (filterPlatform !== 'all') params.set('platform', filterPlatform);
       if (filterStatus !== 'all') params.set('status', filterStatus);
-      const res = await fetch(`/api/atlas/chat-drafts?${params.toString()}`);
-      if (!res.ok) throw new Error('Failed to fetch chat drafts');
-      return res.json();
+      return apiFetch<{ chatDrafts: ChatDraft[] }>(`/api/atlas/chat-drafts?${params.toString()}`);
     },
-    refetchInterval: 8000,
+    refetchInterval: 5000,
   });
 
   const syncChatMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/atlas/integrations/chat/sync', { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to sync chat messages');
-      return res.json();
+      return apiFetch<any>('/api/atlas/integrations/chat/sync', { method: 'POST' });
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/chat-drafts'] });
@@ -72,13 +69,11 @@ export function ChatInbox() {
 
   const ingestMutation = useMutation({
     mutationFn: async (payload: { platform: string; chatId: string; senderName: string; senderEmail?: string; incomingMessage: string }) => {
-      const res = await fetch('/api/atlas/chat-drafts/ingest', {
+      return apiFetch<any>('/api/atlas/chat-drafts/ingest', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       });
-      if (!res.ok) throw new Error('Failed to ingest chat message');
-      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/chat-drafts'] });
@@ -88,10 +83,7 @@ export function ChatInbox() {
 
   const generateDraftMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/atlas/chat-drafts/${id}/generate-draft`, { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to generate draft');
-      return data;
+      return apiFetch<any>(`/api/atlas/chat-drafts/${id}/generate-draft`, { method: 'POST' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/chat-drafts'] });
@@ -103,13 +95,11 @@ export function ChatInbox() {
 
   const saveEditMutation = useMutation({
     mutationFn: async ({ id, text }: { id: string; text: string }) => {
-      const res = await fetch(`/api/atlas/chat-drafts/${id}`, {
+      return apiFetch<any>(`/api/atlas/chat-drafts/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ twinDraftResponse: text }),
       });
-      if (!res.ok) throw new Error('Failed to update draft');
-      return res.json();
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/chat-drafts'] });
@@ -119,9 +109,7 @@ export function ChatInbox() {
 
   const approveMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/atlas/chat-drafts/${id}/approve`, { method: 'POST' });
-      if (!res.ok) throw new Error('Failed to approve draft');
-      return res.json();
+      return apiFetch<any>(`/api/atlas/chat-drafts/${id}/approve`, { method: 'POST' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/chat-drafts'] });
@@ -130,9 +118,7 @@ export function ChatInbox() {
 
   const deleteMutation = useMutation({
     mutationFn: async (id: string) => {
-      const res = await fetch(`/api/atlas/chat-drafts/${id}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error('Failed to delete message');
-      return res.json();
+      return apiFetch<any>(`/api/atlas/chat-drafts/${id}`, { method: 'DELETE' });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/chat-drafts'] });
@@ -141,10 +127,7 @@ export function ChatInbox() {
 
   const clearAllChatsMutation = useMutation({
     mutationFn: async () => {
-      const res = await fetch('/api/atlas/chat-drafts/clear', { method: 'POST' });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to clear chat drafts');
-      return data;
+      return apiFetch<any>('/api/atlas/chat-drafts/clear', { method: 'POST' });
     },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ['/api/atlas/chat-drafts'] });

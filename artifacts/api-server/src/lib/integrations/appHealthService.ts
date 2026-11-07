@@ -108,11 +108,20 @@ export async function getClientAppHealth(workspaceId: string): Promise<ClientHea
   } else {
     // Cloud / Render environment: read latest workstation heartbeat from Supabase
     try {
-      const [record] = await db
+      let [record] = await db
         .select()
         .from(atlasAppHealthTable)
         .where(eq(atlasAppHealthTable.workspaceId, workspaceId))
         .limit(1);
+
+      if (!record) {
+        const { desc } = await import("drizzle-orm");
+        [record] = await db
+          .select()
+          .from(atlasAppHealthTable)
+          .orderBy(desc(atlasAppHealthTable.lastHeartbeat))
+          .limit(1);
+      }
 
       if (record) {
         lastChecked = record.lastHeartbeat ? new Date(record.lastHeartbeat) : new Date();

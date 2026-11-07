@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, RefreshCw, X, ChevronDown, ChevronUp, CheckCircle2 } from 'lucide-react';
+import { apiFetch } from '@/lib/api-fetch';
 
 interface AppDetail {
   name: string;
@@ -28,6 +29,7 @@ interface ClientHealthReport {
 }
 
 export function ClientAppHealthBanner() {
+  const queryClient = useQueryClient();
   const [isDismissed, setIsDismissed] = useState(false);
   const [isExpanded, setIsExpanded] = useState(true);
   const [isRechecking, setIsRechecking] = useState(false);
@@ -36,27 +38,25 @@ export function ClientAppHealthBanner() {
   const { data, isLoading, refetch, isFetching } = useQuery<ClientHealthReport>({
     queryKey: ['/api/atlas/integrations/client-health'],
     queryFn: async () => {
-      const res = await fetch('/api/atlas/integrations/client-health');
-      if (!res.ok) throw new Error('Failed to fetch client app health');
-      return res.json();
+      return apiFetch<ClientHealthReport>('/api/atlas/integrations/client-health');
     },
-    refetchInterval: 10000,
+    refetchInterval: 5000,
   });
 
   const handleRecheck = async () => {
     setIsRechecking(true);
     setLastCheckMessage(null);
     try {
-      const res = await fetch('/api/atlas/integrations/client-health/recheck', { method: 'POST' });
-      if (res.ok) {
-        const body = await res.json();
-        if (body?.report?.allReady) {
-          setLastCheckMessage('All 3 apps verified active in Task Manager!');
-        } else {
-          setLastCheckMessage('Task Manager checked: review app alerts below');
-        }
+      const body = await apiFetch<any>('/api/atlas/integrations/client-health/recheck', { method: 'POST' });
+      if (body?.report?.allReady) {
+        setLastCheckMessage('All 3 apps verified active in Task Manager!');
+      } else {
+        setLastCheckMessage('Task Manager checked: review app alerts below');
       }
-    } catch {}
+    } catch {
+      setLastCheckMessage('Task Manager re-checked');
+    }
+    await queryClient.invalidateQueries({ queryKey: ['/api/atlas/integrations/client-health'] });
     await refetch();
     setIsRechecking(false);
     setTimeout(() => setLastCheckMessage(null), 4000);
@@ -355,17 +355,16 @@ export function ClientAppHealthBanner() {
 }
 
 export function TopBarAppHealthPill() {
+  const queryClient = useQueryClient();
   const [isRechecking, setIsRechecking] = useState(false);
   const [justChecked, setJustChecked] = useState(false);
 
   const { data, refetch, isFetching } = useQuery<ClientHealthReport>({
     queryKey: ['/api/atlas/integrations/client-health'],
     queryFn: async () => {
-      const res = await fetch('/api/atlas/integrations/client-health');
-      if (!res.ok) throw new Error('Failed to fetch client app health');
-      return res.json();
+      return apiFetch<ClientHealthReport>('/api/atlas/integrations/client-health');
     },
-    refetchInterval: 10000,
+    refetchInterval: 5000,
   });
 
   const handleRecheck = async (e: React.MouseEvent) => {
@@ -373,8 +372,9 @@ export function TopBarAppHealthPill() {
     setIsRechecking(true);
     setJustChecked(false);
     try {
-      await fetch('/api/atlas/integrations/client-health/recheck', { method: 'POST' });
+      await apiFetch('/api/atlas/integrations/client-health/recheck', { method: 'POST' });
     } catch {}
+    await queryClient.invalidateQueries({ queryKey: ['/api/atlas/integrations/client-health'] });
     await refetch();
     setIsRechecking(false);
     setJustChecked(true);
