@@ -2,7 +2,7 @@ import { getActiveOwnerEmail } from '@workspace/api-client-react';
 
 export function getSessionToken(): string | null {
   try {
-    return localStorage.getItem('atlas_session_token');
+    return sessionStorage.getItem('atlas_session_token');
   } catch {
     return null;
   }
@@ -10,12 +10,14 @@ export function getSessionToken(): string | null {
 
 export function setSessionToken(token: string): void {
   try {
-    localStorage.setItem('atlas_session_token', token);
+    sessionStorage.setItem('atlas_session_token', token);
+    localStorage.removeItem('atlas_session_token');
   } catch (_) {}
 }
 
 export function removeSessionToken(): void {
   try {
+    sessionStorage.removeItem('atlas_session_token');
     localStorage.removeItem('atlas_session_token');
   } catch (_) {}
 }
@@ -45,6 +47,15 @@ export async function apiFetch<T = any>(input: RequestInfo | URL, init?: Request
     } catch {
       errJson = { error: errorText || `HTTP ${res.status}` };
     }
+
+    if (res.status === 401 && typeof window !== 'undefined') {
+      removeSessionToken();
+      const code = errJson?.code;
+      if (!window.location.pathname.startsWith('/login')) {
+        window.location.href = `/login?reason=${code === 'SESSION_SUPERSEDED' ? 'superseded' : 'unauthorized'}`;
+      }
+    }
+
     throw new Error(errJson.error || `HTTP ${res.status}`);
   }
 

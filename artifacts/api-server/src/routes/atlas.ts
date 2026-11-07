@@ -222,16 +222,9 @@ router.get("/atlas/session", async (req, res): Promise<void> => {
     );
   } catch (err: any) {
     logger.error({ err }, "Error in /atlas/session");
-    res.json({
-      userId: "user_deepak_paranjape_kentplc_com",
-      workspace: {
-        id: "1a39970a-abf0-48c3-8b89-08b669e80bbe",
-        name: "Deepak's Piping Engineering Workspace",
-        industry: "Oil & Gas Piping Engineering",
-        createdAt: new Date(),
-      },
-      role: "owner",
-    });
+    if (!res.headersSent) {
+      res.status(500).json({ error: "Failed to retrieve session." });
+    }
   }
 });
 

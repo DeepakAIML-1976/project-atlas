@@ -17,6 +17,8 @@ import { EmailInbox } from '@/pages/email-inbox';
 import { ChatInbox } from '@/pages/chat-inbox';
 import { DelegationRules } from '@/pages/delegation-rules';
 import { LoginPage } from '@/pages/login';
+import { getSessionToken, removeSessionToken } from '@/lib/api-fetch';
+import { SessionMonitor } from '@/components/SessionMonitor';
 
 const queryClient = new QueryClient({defaultOptions:{queries:{retry:1,refetchOnWindowFocus:false}}});
 const rawClerkKey = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY ?? "";
@@ -73,19 +75,40 @@ function AuthPage({mode}:{mode:'in'|'up'}){
   </div>;
 }
 function Home(){
-  if (!hasClerkKey) return <Redirect to="/overview"/>;
-  return <><Show when="signed-in"><Redirect to="/overview"/></Show><Show when="signed-out"><Landing/></Show></>;
+  if (hasClerkKey) {
+    return <><Show when="signed-in"><Redirect to="/overview"/></Show><Show when="signed-out"><Landing/></Show></>;
+  }
+  const token = getSessionToken();
+  if (!token) return <Redirect to="/login"/>;
+  return <Redirect to="/overview"/>;
 }
 function Workspace({children}:{children:ReactNode}){
   const session=useGetAtlasSession();
   if(session.isLoading)return <div style={{minHeight:'100dvh',padding:'15vw'}}><Load count={3}/></div>;
-  if(session.isError)return <div style={{maxWidth:550,margin:'18vh auto',padding:24}}><ErrorState retry={()=>session.refetch()}/></div>;
+  if(session.isError) {
+    const err: any = session.error;
+    if (err?.status === 401 || err?.statusCode === 401 || err?.data?.code === 'SESSION_SUPERSEDED' || err?.data?.code === 'AUTH_REQUIRED') {
+      removeSessionToken();
+      const reason = err?.data?.code === 'SESSION_SUPERSEDED' ? 'superseded' : 'unauthorized';
+      return <Redirect to={`/login?reason=${reason}`} />;
+    }
+    return <div style={{maxWidth:550,margin:'18vh auto',padding:24}}><ErrorState retry={()=>session.refetch()}/></div>;
+  }
   if(!session.data?.workspace)return <Onboarding/>;
-  return <Shell workspace={session.data.workspace.name}>{children}</Shell>;
+  return <>
+    <SessionMonitor />
+    <Shell workspace={session.data.workspace.name}>{children}</Shell>
+  </>;
 }
 function Protected({children}:{children:ReactNode}){
-  if (!hasClerkKey) return <Workspace>{children}</Workspace>;
-  return <><Show when="signed-in"><Workspace>{children}</Workspace></Show><Show when="signed-out"><Redirect to="/"/></Show></>;
+  if (hasClerkKey) {
+    return <><Show when="signed-in"><Workspace>{children}</Workspace></Show><Show when="signed-out"><Redirect to="/"/></Show></>;
+  }
+  const token = getSessionToken();
+  if (!token) {
+    return <Redirect to="/login"/>;
+  }
+  return <Workspace>{children}</Workspace>;
 }
 function Routed({children}:{children:ReactNode}){const [location]=useLocation();return <ErrorBoundary resetKey={location}>{children}</ErrorBoundary>;}
 function NotFound(){return <div style={{minHeight:'100dvh',display:'grid',placeItems:'center',padding:25,textAlign:'center'}}><div><div className="eyebrow">404 / NOT FOUND</div><h1 className="page-title">This path goes <em>nowhere.</em></h1><p className="page-lede" style={{margin:'0 auto 24px'}}>There is no page at this address. Your workspace is still where you left it.</p><Link href="/overview" className="btn btn-primary" data-testid="link-not-found-overview">Go to workspace</Link></div></div>;}

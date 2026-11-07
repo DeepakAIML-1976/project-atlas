@@ -138,14 +138,17 @@ export function ProfileSwitcher({ variant = 'topbar' }: { variant?: 'topbar' | '
     }
   };
 
-  const handleSignOut = () => {
+  const handleSignOut = async () => {
+    try {
+      await fetch('/api/atlas/auth/logout', { method: 'POST' });
+    } catch (_) {}
     removeSessionToken();
     setActiveOwnerEmail('');
     try {
       localStorage.removeItem('atlas_active_owner_email');
     } catch (_) {}
     queryClient.clear();
-    setLocation('/login');
+    window.location.href = '/login';
   };
 
   // Switch Modal Component

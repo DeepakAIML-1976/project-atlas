@@ -8,11 +8,31 @@ import { getTwinDisplayName } from "../lib/atlas";
 const router: IRouter = Router();
 
 export function generateSessionToken(email: string): string {
-  const payload = Buffer.from(JSON.stringify({ email, timestamp: Date.now() })).toString("base64url");
+  const nonce = crypto.randomUUID();
+  const payload = Buffer.from(JSON.stringify({ email, nonce, timestamp: Date.now() })).toString("base64url");
   const signature = crypto.createHmac("sha256", process.env.CREDENTIALS_ENCRYPTION_KEY || "kent-digital-twin-suite-2026-key-32b")
     .update(payload)
     .digest("hex");
   return `atlas_sess_${payload}.${signature}`;
+}
+
+export function parseSessionToken(token: string): { email: string; nonce?: string; timestamp: number } | null {
+  try {
+    if (!token || typeof token !== "string" || !token.startsWith("atlas_sess_")) return null;
+    const raw = token.slice("atlas_sess_".length);
+    const dotIdx = raw.lastIndexOf(".");
+    if (dotIdx === -1) return null;
+    const payload = raw.slice(0, dotIdx);
+    const signature = raw.slice(dotIdx + 1);
+    const expected = crypto.createHmac("sha256", process.env.CREDENTIALS_ENCRYPTION_KEY || "kent-digital-twin-suite-2026-key-32b")
+      .update(payload)
+      .digest("hex");
+    if (signature !== expected) return null;
+    const jsonStr = Buffer.from(payload, "base64url").toString("utf8");
+    return JSON.parse(jsonStr);
+  } catch {
+    return null;
+  }
 }
 
 // POST /api/atlas/auth/login
@@ -118,6 +138,26 @@ router.post("/atlas/auth/login", async (req, res): Promise<void> => {
     const token = generateSessionToken(normalizedEmail);
     const firstName = user.displayName.split(" ")[0];
 
+    // Invalidate any previous session across any other system/device and activate new token
+    const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "";
+    const userAgent = (req.headers["user-agent"] as string) || "";
+    await db
+      .update(atlasUsersTable)
+      .set({
+        activeSessionToken: token,
+        lastLoginAt: new Date(),
+        lastSessionIp: clientIp,
+        lastSessionUserAgent: userAgent,
+      })
+      .where(eq(atlasUsersTable.id, user.id));
+
+    // Set browser session cookie (no maxAge/expires = automatically destroyed on browser close)
+    res.cookie("atlas_session", token, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+    });
+
     res.json({
       success: true,
       token,
@@ -166,6 +206,24 @@ router.post("/atlas/auth/verify-switch", async (req, res): Promise<void> => {
   const token = generateSessionToken(normalizedEmail);
   const firstName = user.displayName.split(" ")[0];
 
+  const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || "";
+  const userAgent = (req.headers["user-agent"] as string) || "";
+  await db
+    .update(atlasUsersTable)
+    .set({
+      activeSessionToken: token,
+      lastLoginAt: new Date(),
+      lastSessionIp: clientIp,
+      lastSessionUserAgent: userAgent,
+    })
+    .where(eq(atlasUsersTable.id, user.id));
+
+  res.cookie("atlas_session", token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  });
+
   res.json({
     success: true,
     token,
@@ -177,6 +235,37 @@ router.post("/atlas/auth/verify-switch", async (req, res): Promise<void> => {
       twinTitle: `${firstName}'s AI Representative`,
     },
   });
+});
+
+// GET /api/atlas/auth/session-check
+router.get("/atlas/auth/session-check", async (req, res): Promise<void> => {
+  const { authenticatedUser } = await import("../lib/atlas");
+  const auth = await authenticatedUser(req, res);
+  if (!auth) return; // authenticatedUser sends 401 with code SESSION_SUPERSEDED or AUTH_REQUIRED
+  res.json({ valid: true, email: auth.ownerEmail, user: auth.ownerName });
+});
+
+// POST /api/atlas/auth/logout
+router.post("/atlas/auth/logout", async (req, res): Promise<void> => {
+  const authHeader = (req.headers["authorization"] as string)?.trim();
+  const token = authHeader?.startsWith("Bearer ")
+    ? authHeader.slice(7).trim()
+    : ((req.cookies?.atlas_session as string) || (req.headers["x-session-token"] as string));
+
+  if (token) {
+    const parsed = parseSessionToken(token);
+    if (parsed?.email) {
+      try {
+        await db
+          .update(atlasUsersTable)
+          .set({ activeSessionToken: null })
+          .where(eq(atlasUsersTable.email, parsed.email));
+      } catch (_) {}
+    }
+  }
+
+  res.clearCookie("atlas_session");
+  res.json({ success: true, message: "Logged out successfully" });
 });
 
 // GET /api/atlas/auth/me

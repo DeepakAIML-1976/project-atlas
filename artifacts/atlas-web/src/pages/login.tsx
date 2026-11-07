@@ -3,7 +3,7 @@ import { useLocation } from 'wouter';
 import { useQueryClient } from '@tanstack/react-query';
 import { setActiveOwnerEmail } from '@workspace/api-client-react';
 import { setSessionToken } from '@/lib/api-fetch';
-import { ShieldCheck, ArrowRight, Sparkles, Database, Mail, Eye, EyeOff, AlertCircle, CheckCircle2, Lock } from 'lucide-react';
+import { ShieldCheck, ArrowRight, Sparkles, Database, Mail, Eye, EyeOff, AlertCircle, CheckCircle2, Lock, ShieldAlert } from 'lucide-react';
 
 interface PresetUser {
   name: string;
@@ -30,6 +30,27 @@ const PRESET_USERS: PresetUser[] = [
 export function LoginPage() {
   const [, setLocation] = useLocation();
   const queryClient = useQueryClient();
+
+  const [logoutNotice, setLogoutNotice] = useState<{ title: string; desc: string; type: 'warning' | 'info' } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    const params = new URLSearchParams(window.location.search);
+    const reason = params.get('reason');
+    if (reason === 'superseded') {
+      return {
+        title: 'Logged Out: Active on Another Device',
+        desc: 'You were automatically logged out because this account was opened on another system or browser. For engineering governance and security, only one active session is permitted.',
+        type: 'warning',
+      };
+    }
+    if (reason === 'unauthorized') {
+      return {
+        title: 'Session Ended',
+        desc: 'Your session has ended because the browser window was closed. Please log in to access your Digital Twin workspace.',
+        type: 'info',
+      };
+    }
+    return null;
+  });
 
   const [email, setEmail] = useState('deepak.paranjape@kentplc.com');
   const [password, setPassword] = useState('');
@@ -289,6 +310,41 @@ export function LoginPage() {
               Enter your corporate email ID and email password to unlock your Digital Twin.
             </p>
           </div>
+
+          {/* Security / Logout Notice */}
+          {logoutNotice && (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 12,
+                background: logoutNotice.type === 'warning' ? '#fff6ea' : '#f0f5ff',
+                border: `1.5px solid ${logoutNotice.type === 'warning' ? '#f59e0b' : '#3b82f6'}`,
+                color: logoutNotice.type === 'warning' ? '#92400e' : '#1e40af',
+                padding: '12px 14px',
+                borderRadius: 8,
+                fontSize: 12,
+                lineHeight: 1.5,
+                marginBottom: 18,
+                boxShadow: '0 2px 6px rgba(0,0,0,0.04)',
+              }}
+            >
+              <ShieldAlert
+                size={18}
+                style={{
+                  flexShrink: 0,
+                  marginTop: 2,
+                  color: logoutNotice.type === 'warning' ? '#d97706' : '#2563eb',
+                }}
+              />
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 2 }}>
+                  {logoutNotice.title}
+                </div>
+                <div>{logoutNotice.desc}</div>
+              </div>
+            </div>
+          )}
 
           {/* Quick Preset Selector */}
           <div style={{ marginBottom: 18 }}>

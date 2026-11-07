@@ -21,7 +21,7 @@ const pool = new Pool({
 });
 
 pool.on("error", (err) => {
-  console.warn("PostgreSQL Pool idle client notification (auto-reconnecting):", err?.message || err);
+  console.warn("PostgreSQL Pool notification (reconnecting):", err?.message || err);
 });
 
 process.on("uncaughtException", (err) => {
@@ -32,24 +32,30 @@ process.on("unhandledRejection", (reason) => {
   console.warn("Companion unhandled rejection (resuming):", reason);
 });
 
+const seenMessageIds = new Set();
+let seenIdsLoaded = false;
+let lastTeamsScanTime = Date.now() - 3600 * 1000; // scan last 1 hour initially
+
 function isDeepak(s) {
   if (!s) return false;
   const l = s.toLowerCase();
   return l.includes("deepak.paranjape") || l.includes("deepak paranjape") || l === "deepak" || l.includes("dpengineering");
 }
 
-function checkTasks() {
+export function checkTasks() {
   if (process.platform !== "win32") return { ol: false, tm: false, zm: false };
   let ol = false;
   let tm = false;
   let zm = false;
+
   try {
     const out = execSync("tasklist /FO CSV /NH", { encoding: "utf8", windowsHide: true }).toLowerCase();
     ol = out.includes("outlook.exe");
     tm = out.includes("ms-teams.exe") || out.includes("teams.exe");
     zm = out.includes("zoom.exe");
-  } catch {}
-  if (!tm || !zm || !ol) {
+    return { ol, tm, zm };
+  } catch (err) {
+    // Only fallback if tasklist command failed completely
     try {
       const psOut = execSync('powershell.exe -NoProfile -Command "Get-Process -Name OUTLOOK, ms-teams, teams, Zoom -ErrorAction SilentlyContinue | Select-Object -ExpandProperty ProcessName"', { encoding: "utf8", windowsHide: true }).toLowerCase();
       if (psOut.includes("outlook")) ol = true;
@@ -60,13 +66,14 @@ function checkTasks() {
   return { ol, tm, zm };
 }
 
-async function syncCycle() {
+// 1. Dedicated, Non-blocking Heartbeat (Runs every 10 seconds)
+async function heartbeatCycle() {
   const { ol, tm, zm } = checkTasks();
   const timestamp = new Date().toLocaleTimeString();
 
-  const client = await pool.connect();
+  let client = null;
   try {
-    // 1. Update Real-Time App Health Heartbeat in Supabase
+    client = await pool.connect();
     const healthId = "health_" + WORKSPACE_ID;
     await client.query(`
       INSERT INTO atlas_app_health (id, workspace_id, device_name, outlook_running, teams_running, zoom_running, account_email, last_heartbeat)
@@ -78,15 +85,41 @@ async function syncCycle() {
         last_heartbeat = NOW()
     `, [healthId, WORKSPACE_ID, "Windows Workstation", ol, tm, zm, TARGET_ACCOUNT]);
 
-    // Status Log
     console.log(`[${timestamp}] Heartbeat -> Outlook: ${ol ? "RUNNING" : "CLOSED"}, Teams: ${tm ? "RUNNING" : "CLOSED"}, Zoom: ${zm ? "RUNNING" : "CLOSED"}`);
+  } catch (err) {
+    console.warn(`[${timestamp}] Heartbeat sync notice:`, err.message);
+  } finally {
+    if (client) {
+      try { client.release(); } catch {}
+    }
+  }
+}
 
-    // 2. Direct Teams Ingestion (if running in Task Manager)
+// 2. Direct Teams & Zoom Message Ingestion (Runs every 30 seconds)
+async function ingestCycle() {
+  const { tm, zm } = checkTasks();
+  if (!tm && !zm) return;
+
+  const timestamp = new Date().toLocaleTimeString();
+  let client = null;
+
+  try {
+    client = await pool.connect();
+
+    // Preload known message IDs once to eliminate sequential database calls
+    if (!seenIdsLoaded) {
+      const res = await client.query("SELECT message_id FROM atlas_chat_drafts WHERE workspace_id = $1", [WORKSPACE_ID]);
+      for (const r of res.rows) {
+        if (r.message_id) seenMessageIds.add(r.message_id);
+      }
+      seenIdsLoaded = true;
+    }
+
+    // --- Teams Ingestion ---
     if (tm) {
       const localApp = process.env.LOCALAPPDATA || "";
       const candidateDirs = [
         path.join(localApp, "Packages", "MSTeams_8wekyb3d8bbwe", "LocalCache", "Microsoft", "MSTeams", "EBWebView", "WV2Profile_tfw", "IndexedDB", "https_teams.microsoft.com_0.indexeddb.leveldb"),
-        path.join(localApp, "Packages", "MSTeams_8wekyb3d8bbwe", "LocalCache", "Microsoft", "MSTeams", "EBWebView", "WV2Profile_tfl", "IndexedDB", "https_teams.microsoft.com_0.indexeddb.leveldb"),
         path.join(process.env.APPDATA || "", "Microsoft", "Teams", "IndexedDB", "https_teams.microsoft.com_0.indexeddb.leveldb"),
       ];
 
@@ -196,10 +229,8 @@ async function syncCycle() {
         if (isDirect) return true;
         if (/@deepak(\b|\s|paranjape)/i.test(text)) return true;
         if (text.toLowerCase().includes("deepak.paranjape@kentplc.com")) return true;
-        const addressPattern = /(?:^|[\r\n.!?]\s*)(?:hi|hello|hey|dear)?\s*@?deepak\b(?:\s*paranjape)?(?:\s*[,:\-–—]|\s+(?:please|could|can|what|how|where|when|why|is|are|do|did|will|would|check|confirm|review|verify|note|regards|thanks|thank))/i;
-        if (addressPattern.test(text)) return true;
-        if (/^@?deepak\b/i.test(text)) return true;
-        return false;
+        const addressPattern = /(?:^|[\r\n.!?]\s*)(?:hi|hello|hey|dear)?\s*@?deepak\b/i;
+        return addressPattern.test(text);
       }
 
       const needle = Buffer.from([0x22, 0x07, 0x63, 0x6f, 0x6e, 0x74, 0x65, 0x6e, 0x74, 0x22]);
@@ -216,7 +247,8 @@ async function syncCycle() {
           try {
             const fullPath = path.join(dir, file);
             const stat = fs.statSync(fullPath);
-            if (Date.now() - stat.mtimeMs > 60 * 86400 * 1000) continue;
+            // Only examine files modified since last scan
+            if (stat.mtimeMs < lastTeamsScanTime) continue;
 
             const fileBuf = fs.readFileSync(fullPath);
             const blocks = file.endsWith(".ldb") ? parseLevelDbBlocks(fileBuf) : [fileBuf];
@@ -247,7 +279,6 @@ async function syncCycle() {
                   const pre = b.slice(Math.max(0, marker - 600), marker).toString("latin1");
                   const post = b.slice(marker, Math.min(b.length, marker + 600)).toString("latin1");
 
-                  // Rule 1: Never ingest self-sent messages
                   if (pre.includes("isSentByCurrentUserT") || post.includes("isSentByCurrentUserT")) continue;
 
                   const m = pre.match(/imDisplayName[^\w]{1,4}([A-Z][a-zA-Z\s\.\-]{2,35})/i) ||
@@ -256,14 +287,12 @@ async function syncCycle() {
 
                   if (isDeepak(sender)) continue;
 
-                  // Extract chat ID
                   let chatId = "Teams Direct Chat";
                   const convMatch = (pre + post).match(/19:[a-zA-Z0-9_\-]+@[a-zA-Z0-9_\.]+/);
                   if (convMatch) chatId = convMatch[0];
 
                   const isDirect = chatId.includes("unq.gbl.spaces") || chatId.includes("uni01_") || pre.includes("personal_dm") || pre.includes("oneOnOne");
 
-                  // Rule 2: Only 1-on-1 DMs or messages specifically addressed to Deepak
                   if (!isAddressed(clean, isDirect)) continue;
 
                   clean = clean.replace(/[^\x20-\x7E\r\n]/g, "").trim();
@@ -272,28 +301,33 @@ async function syncCycle() {
                   const hash = crypto.createHash("md5").update(`${sender}:::${clean}`).digest("hex");
                   const msgId = `teams_desktop_${hash.substring(0, 24)}`;
 
-                  const existCheck = await client.query("SELECT id FROM atlas_chat_drafts WHERE workspace_id = $1 AND message_id = $2", [WORKSPACE_ID, msgId]);
-                  if (existCheck.rows.length === 0) {
-                    await client.query(`
-                      INSERT INTO atlas_chat_drafts (id, workspace_id, platform, chat_id, message_id, sender_name, sender_email, incoming_message, twin_draft_response, status, created_at)
-                      VALUES ($1, $2, 'teams', $3, $4, $5, null, $6, '', 'ingested', $7)
-                    `, [crypto.randomUUID(), WORKSPACE_ID, chatId, msgId, sender, clean, stat.mtime || new Date()]);
-                    teamsAdded++;
-                  }
+                  // Ultra-fast memory check
+                  if (seenMessageIds.has(msgId)) continue;
+
+                  await client.query(`
+                    INSERT INTO atlas_chat_drafts (id, workspace_id, platform, chat_id, message_id, sender_name, sender_email, incoming_message, twin_draft_response, status, created_at)
+                    VALUES ($1, $2, 'teams', $3, $4, $5, null, $6, '', 'ingested', $7)
+                    ON CONFLICT (id) DO NOTHING
+                  `, [crypto.randomUUID(), WORKSPACE_ID, chatId, msgId, sender, clean, stat.mtime || new Date()]);
+
+                  seenMessageIds.add(msgId);
+                  teamsAdded++;
                 }
               }
             }
           } catch {}
         }
       }
+
       if (teamsAdded > 0) {
-        console.log(`[${timestamp}] Ingested ${teamsAdded} new Teams message(s) from running Teams app.`);
+        console.log(`[${timestamp}] Ingested ${teamsAdded} new Teams message(s).`);
       }
+      lastTeamsScanTime = Date.now() - 10000;
     }
 
-    // 3. Direct Zoom Ingestion (if running in Task Manager)
+    // --- Zoom Ingestion ---
     if (zm) {
-      const zoomBase = process.env.USERPROFILE ? path.join(process.env.USERPROFILE, "Documents", "Zoom") : "";
+      const zoomBase = path.join(process.env.USERPROFILE || "", "Documents", "Zoom");
       if (fs.existsSync(zoomBase)) {
         let zoomAdded = 0;
         const folders = fs.readdirSync(zoomBase, { withFileTypes: true });
@@ -310,14 +344,16 @@ async function syncCycle() {
               if (isDeepak(sender)) continue;
 
               const msgId = crypto.createHash("sha256").update("zoom:::" + f.name + ":::" + sender + ":::" + msg).digest("hex").substring(0, 32);
-              const existCheck = await client.query("SELECT id FROM atlas_chat_drafts WHERE workspace_id = $1 AND message_id = $2", [WORKSPACE_ID, msgId]);
-              if (existCheck.rows.length === 0) {
-                await client.query(`
-                  INSERT INTO atlas_chat_drafts (id, workspace_id, platform, chat_id, message_id, sender_name, incoming_message, twin_draft_response, status, created_at)
-                  VALUES ($1, $2, 'zoom', $3, $4, $5, $6, '', 'ingested', NOW())
-                `, [crypto.randomUUID(), WORKSPACE_ID, f.name, msgId, sender, msg]);
-                zoomAdded++;
-              }
+              if (seenMessageIds.has(msgId)) continue;
+
+              await client.query(`
+                INSERT INTO atlas_chat_drafts (id, workspace_id, platform, chat_id, message_id, sender_name, incoming_message, twin_draft_response, status, created_at)
+                VALUES ($1, $2, 'zoom', $3, $4, $5, $6, '', 'ingested', NOW())
+                ON CONFLICT (id) DO NOTHING
+              `, [crypto.randomUUID(), WORKSPACE_ID, f.name, msgId, sender, msg]);
+
+              seenMessageIds.add(msgId);
+              zoomAdded++;
             }
           }
         }
@@ -327,9 +363,11 @@ async function syncCycle() {
       }
     }
   } catch (err) {
-    console.warn(`[${timestamp}] Sync notice:`, err.message);
+    console.warn(`[${timestamp}] Ingest cycle notice:`, err.message);
   } finally {
-    client.release();
+    if (client) {
+      try { client.release(); } catch {}
+    }
   }
 }
 
@@ -341,13 +379,21 @@ async function main() {
   console.log("Syncing directly from desktop applications to cloud database...");
   console.log("Press Ctrl+C to terminate at any time.\n");
 
-  // Run initial tick
-  await syncCycle();
+  // Initial immediate heartbeat
+  await heartbeatCycle().catch(console.error);
 
-  // Run every 20 seconds
+  // Heartbeat loop every 10 seconds (Guaranteed fast <100ms)
   setInterval(() => {
-    syncCycle().catch(console.error);
-  }, 20000);
+    heartbeatCycle().catch(console.error);
+  }, 10000);
+
+  // Initial ingest cycle
+  ingestCycle().catch(console.error);
+
+  // Ingest loop every 30 seconds
+  setInterval(() => {
+    ingestCycle().catch(console.error);
+  }, 30000);
 }
 
 main().catch(console.error);

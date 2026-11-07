@@ -379,12 +379,18 @@ export async function customFetch<T = unknown>(
     headers.set("X-Owner-Email", activeEmail);
   }
 
-  // Attach bearer token when an auth getter is configured and no
-  // Authorization header has been explicitly provided.
-  if (_authTokenGetter && !headers.has("authorization")) {
-    const token = await _authTokenGetter();
+  // Attach bearer token when an auth getter is configured or from sessionStorage
+  if (!headers.has("authorization") && !headers.has("Authorization")) {
+    let token: string | null = null;
+    if (_authTokenGetter) {
+      token = await _authTokenGetter();
+    } else if (typeof window !== "undefined") {
+      try {
+        token = sessionStorage.getItem("atlas_session_token");
+      } catch (_) {}
+    }
     if (token) {
-      headers.set("authorization", `Bearer ${token}`);
+      headers.set("Authorization", `Bearer ${token}`);
     }
   }
 
@@ -394,6 +400,25 @@ export async function customFetch<T = unknown>(
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);
+
+    if (response.status === 401 && typeof window !== "undefined") {
+      const errCode = (errorData as any)?.code;
+      try {
+        sessionStorage.removeItem("atlas_session_token");
+        localStorage.removeItem("atlas_session_token");
+      } catch (_) {}
+
+      if (errCode === "SESSION_SUPERSEDED") {
+        if (!window.location.pathname.startsWith("/login")) {
+          window.location.href = "/login?reason=superseded";
+        }
+      } else if (errCode === "AUTH_REQUIRED") {
+        if (!window.location.pathname.startsWith("/login")) {
+          window.location.href = "/login?reason=unauthorized";
+        }
+      }
+    }
+
     throw new ApiError(response, errorData, requestInfo);
   }
 

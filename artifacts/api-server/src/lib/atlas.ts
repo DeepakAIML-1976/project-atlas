@@ -1,8 +1,9 @@
 import { getAuth } from "@clerk/express";
 import type { Request, Response } from "express";
 import { and, eq } from "drizzle-orm";
-import { db, atlasMembershipsTable, atlasTwinsTable, atlasWorkspacesTable } from "@workspace/db";
+import { db, atlasMembershipsTable, atlasTwinsTable, atlasWorkspacesTable, atlasUsersTable } from "@workspace/db";
 import { logger } from "./logger";
+import { parseSessionToken } from "../routes/auth";
 
 export const TWIN_FIELD_KEYS = [
   "role",
@@ -45,42 +46,84 @@ export async function authenticatedUser(
   req: Request,
   res: Response,
 ): Promise<{ userId: string; ownerEmail: string; ownerName: string } | null> {
-  let userId: string | null = null;
-  let ownerEmail: string | null = null;
-
-  // Header override (useful for API clients & switching active logged-in engineer)
-  const headerEmail = (req.headers["x-owner-email"] as string)?.trim().toLowerCase();
-  if (headerEmail && headerEmail.includes("@")) {
-    ownerEmail = headerEmail;
-  }
-
+  // 1. Check Clerk auth if configured
   if (process.env.CLERK_SECRET_KEY) {
     try {
       const auth = getAuth(req);
-      userId = auth.userId;
-      // In Clerk, user email can be forwarded or inspected
-    } catch {
-      // getAuth throws if request is not authenticated via Clerk
+      if (auth.userId) {
+        const headerEmail = (req.headers["x-owner-email"] as string)?.trim().toLowerCase() || "deepak.paranjape@kentplc.com";
+        return { userId: auth.userId, ownerEmail: headerEmail, ownerName: "Deepak Paranjape" };
+      }
+    } catch {}
+  }
+
+  // 2. Extract token from Authorization header, cookie, or custom header
+  const authHeader = (req.headers["authorization"] as string)?.trim();
+  const bearerToken = authHeader?.startsWith("Bearer ") ? authHeader.slice(7).trim() : null;
+  const cookieToken = (req.cookies?.atlas_session as string)?.trim() || null;
+  const customHeaderToken = (req.headers["x-session-token"] as string)?.trim() || null;
+  const token = bearerToken || cookieToken || customHeaderToken;
+
+  if (!token) {
+    res.status(401).json({
+      error: "Authentication required. Please log in with your email and password.",
+      code: "AUTH_REQUIRED",
+    });
+    return null;
+  }
+
+  // 3. Verify cryptographic token signature & extract payload
+  const parsed = parseSessionToken(token);
+  if (!parsed || !parsed.email) {
+    res.status(401).json({
+      error: "Invalid or expired session token. Please log in again.",
+      code: "AUTH_REQUIRED",
+    });
+    return null;
+  }
+
+  const normalizedEmail = parsed.email.trim().toLowerCase();
+
+  // 4. Validate active session token against database (Single Concurrent Session Enforcement)
+  try {
+    const [user] = await db
+      .select()
+      .from(atlasUsersTable)
+      .where(eq(atlasUsersTable.email, normalizedEmail))
+      .limit(1);
+
+    if (!user) {
+      res.status(401).json({
+        error: "User account not found. Please log in again.",
+        code: "AUTH_REQUIRED",
+      });
+      return null;
     }
-  }
 
-  // Fallback for local SME development mode
-  if (!ownerEmail) {
-    ownerEmail = (process.env.DEFAULT_OWNER_EMAIL || "deepak.paranjape@kentplc.com").trim().toLowerCase();
-  }
-  if (!userId) {
-    userId = `user_${ownerEmail.replace(/[^a-zA-Z0-9]/g, "_")}`;
-  }
+    // If another device/browser logged in, user.activeSessionToken was replaced with a new token!
+    // Or if logged out, activeSessionToken was cleared to null.
+    if (!user.activeSessionToken || user.activeSessionToken !== token) {
+      const isSuperseded = Boolean(user.activeSessionToken && user.activeSessionToken !== token);
+      logger.warn({ email: normalizedEmail, providedToken: token.substring(0, 18) }, isSuperseded ? "Session superseded by login on another device" : "Session token is no longer active");
+      res.status(401).json({
+        error: isSuperseded
+          ? "This account has been logged in on another device or system. Your session has ended."
+          : "Session has expired or was terminated. Please log in again.",
+        code: isSuperseded ? "SESSION_SUPERSEDED" : "AUTH_REQUIRED",
+      });
+      return null;
+    }
 
-  let ownerName = "Deepak Paranjape";
-  if (ownerEmail.includes("sunil")) {
-    ownerName = "Sunil Hiremath";
-  } else if (!ownerEmail.includes("deepak")) {
-    const local = ownerEmail.split("@")[0].replace(/\./g, " ");
-    ownerName = local.replace(/\b\w/g, (c) => c.toUpperCase());
-  }
+    const userId = user.id;
+    const ownerEmail = user.email;
+    const ownerName = user.displayName;
 
-  return { userId, ownerEmail, ownerName };
+    return { userId, ownerEmail, ownerName };
+  } catch (err: any) {
+    logger.error({ err }, "Database error during session validation");
+    res.status(500).json({ error: "Failed to validate session.", code: "SERVER_ERROR" });
+    return null;
+  }
 }
 
 export async function workspaceContext(
